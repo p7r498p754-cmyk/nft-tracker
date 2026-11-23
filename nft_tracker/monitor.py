@@ -220,7 +220,7 @@ def _record(store: Storage, tg: TelegramClient, cfg: Settings, rep: CycleReport,
         meta.update(error=rep.error, failures=failures)
         if failures >= FAILURES_BEFORE_NOTICE:
             _notice(store, tg, cfg, "portals_error",
-                    f"⚠️ Сбой мониторинга уже {failures} проверок подряд: {rep.error}", now)
+                    f"⚠️ Мониторинг недоступен уже {failures} проверок подряд: {rep.error}", now)
     else:
         meta.update(error=None, failures=0, ok_at=iso(now), listings=rep.listings, alerts=rep.alerts)
     meta["warning"] = rep.warning
