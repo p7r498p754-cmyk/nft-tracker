@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -79,8 +80,14 @@ class TelegramClient:
         return self.call("answerCallbackQuery", {"callback_query_id": callback_id})
 
     def updates(self, offset: int, timeout: int = 0) -> list[dict]:
-        result = self.call("getUpdates", {"offset": offset, "timeout": timeout,
-                                           "allowed_updates": ["message", "callback_query"]}, timeout=TIMEOUT + timeout)
+        payload = {"offset": offset, "timeout": timeout, "allowed_updates": ["message", "callback_query"]}
+        try:
+            result = self.call("getUpdates", payload, timeout=TIMEOUT + timeout)
+        except TelegramError as error:
+            if error.code is not None and error.code < 500:
+                raise
+            time.sleep(1)
+            result = self.call("getUpdates", payload, timeout=TIMEOUT + timeout)
         if not isinstance(result, list):
             raise TelegramError("Telegram getUpdates: неожиданный ответ")
         return result

@@ -8,14 +8,16 @@ from typing import Any
 
 from . import __version__
 from .config import Settings
+from .floors import floor_status
 from .storage import Storage
 from .telegram import TelegramClient, TelegramError
 
 OWNER = "owner"
 DISCOUNT_CHOICES = (30, 40, 50)
-COMMANDS = {"/start", "/status", "/settings", "/stop", "/help", "/id", "/delete"}
+COMMANDS = {"/start", "/status", "/settings", "/stop", "/help", "/id", "/delete", "/markets"}
 
 MENU = [
+    [{"text": "Цены Telegram и Fragment", "callback_data": "menu:markets"}],
     [{"text": "📊 Статус", "callback_data": "menu:status"}, {"text": "⚙️ Настройки", "callback_data": "menu:settings"}],
     [{"text": "🔕 Выключить", "callback_data": "menu:stop"}, {"text": "🔔 Включить", "callback_data": "menu:start"}],
     [{"text": "❓ Справка", "callback_data": "menu:help"}, {"text": "🗑 Удалить данные", "callback_data": "menu:delete"}],
@@ -24,7 +26,7 @@ BACK = [[{"text": "⬅️ Меню", "callback_data": "menu:main"}]]
 
 HELP = ("<b>NFT Tracker</b> ищет на Portals подарки дешевле рыночной оценки (по недавним продажам) "
         "и присылает уведомление.\n\n"
-        "/start — включить уведомления\n/status — состояние\n/settings — порог скидки\n"
+        "/start — включить уведомления\n/status — состояние\n/markets — цены Telegram и Fragment\n/settings — порог скидки\n"
         "/stop — выключить\n/id — ваш Telegram ID\n/delete — удалить мои данные\n\n"
         "Бот ничего не покупает и не просит ключи или пароли. Оценка не гарантирует прибыль.")
 
@@ -106,6 +108,8 @@ def _reply(tg: TelegramClient, chat: int, text: str, keyboard: list | None, edit
 
 def _screen(cfg: Settings, store: Storage, action: str, now: datetime) -> tuple[str, list | None]:
     """Text + keyboard for a menu action. Applies the action's side effects."""
+    if action == "markets":
+        return floor_status(store, now), BACK
     if action == "status":
         return status_text(cfg, store, now), BACK
     if action == "settings":
@@ -162,7 +166,7 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         text, kb = _screen(cfg, store, "delete", now)
         tg.send(chat, text, kb)
         return
-    action = {"/start": "start", "/stop": "stop", "/status": "status", "/settings": "settings", "/help": "help"}[command]
+    action = {"/markets": "markets", "/start": "start", "/stop": "stop", "/status": "status", "/settings": "settings", "/help": "help"}[command]
     text, kb = _screen(cfg, store, action, now)
     tg.send(chat, text, kb)
 
@@ -186,7 +190,7 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
         return
     if data.startswith("menu:"):
         action = data.split(":", 1)[1]
-        if action in {"status", "settings", "help", "stop", "start", "delete", "main"}:
+        if action in {"markets", "status", "settings", "help", "stop", "start", "delete", "main"}:
             text, kb = _screen(cfg, store, action, now)
             _reply(tg, chat, text, kb, edit_id)
 

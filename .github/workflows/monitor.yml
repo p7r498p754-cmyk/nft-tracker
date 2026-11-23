@@ -53,6 +53,7 @@ jobs:
           print("Telegram accepted the owner message")
           PYTHON
       - name: Run one monitoring cycle
+        id: scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           PORTALS_API_KEY: ${{ secrets.PORTALS_API_KEY }}
@@ -64,6 +65,12 @@ jobs:
           LISTING_PAGES: ${{ vars.LISTING_PAGES }}
           ALLOW_NO_LINK_ALERTS: ${{ vars.ALLOW_NO_LINK_ALERTS }}
         run: python -m nft_tracker run
+      - name: Read Telegram and Fragment collection floors
+        if: ${{ !cancelled() && steps.scan.outcome != 'skipped' && steps.scan.outcome != '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python -m nft_tracker.floors
       - name: Save state
         if: always()
         uses: actions/cache/save@v4
