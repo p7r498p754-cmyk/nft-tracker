@@ -8,6 +8,8 @@ import time
 from . import __version__
 from .bot import process_updates
 from .config import ConfigError, Settings
+from .catalog import fetch_catalog
+from .floors import refresh
 from .monitor import run_cycle, utcnow
 from .portals import PortalsClient, PortalsError
 from .redact import RedactFilter
@@ -78,6 +80,24 @@ def listen_for_commands(cfg, store, tg, seconds):
     return last_poll_ok
 
 
+def run_loop(cfg, store, tg, portals):
+    next_floors = 0.0
+    while True:
+        started = time.monotonic()
+        cycle_once(cfg, store, tg, portals)
+        if not cfg.setup_mode and started >= next_floors:
+            try:
+                data = fetch_catalog()
+                count = refresh(store, tg, cfg, data, utcnow())
+                LOG.info("Свежих цен коллекций по площадкам: %s", count)
+            except (OSError, ValueError, TelegramError) as error:
+                LOG.warning("Обновление цен коллекций: %s", error)
+            next_floors = time.monotonic() + 300
+        remaining = started + cfg.scan_seconds - time.monotonic()
+        if remaining >= 1 and not listen_for_commands(cfg, store, tg, remaining):
+            return 1
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "run"
     if cmd not in {"run", "loop", "diagnose", "commands"}:
@@ -106,10 +126,7 @@ def main(argv: list[str]) -> int:
     try:
         if cmd == "run":
             return 0 if cycle_once(cfg, store, tg, portals) else 1
-        while True:  # local / own-host mode
-            cycle_once(cfg, store, tg, portals)
-            if not listen_for_commands(cfg, store, tg, cfg.scan_seconds):
-                return 1
+        return run_loop(cfg, store, tg, portals)
     except KeyboardInterrupt:
         return 0
     finally:

@@ -46,3 +46,15 @@ class ExitStatuses(unittest.TestCase):
             self.assertTrue(listen_for_commands(cfg, store, tg, 90))
         self.assertEqual(store.get("offset"), "8")
         self.assertTrue(store.user("owner").active)
+
+    def test_loop_refreshes_floors_and_subtracts_scan_time(self):
+        from nft_tracker.__main__ import run_loop
+        cfg = make_settings(scan_seconds=300)
+        with patch("nft_tracker.__main__.time.monotonic", side_effect=[10, 45, 50]), \
+             patch("nft_tracker.__main__.cycle_once"), \
+             patch("nft_tracker.__main__.fetch_catalog", return_value={"gifts": []}), \
+             patch("nft_tracker.__main__.refresh") as refresh, \
+             patch("nft_tracker.__main__.listen_for_commands", return_value=False) as listen:
+            self.assertEqual(run_loop(cfg, None, None, None), 1)
+        refresh.assert_called_once()
+        self.assertEqual(listen.call_args.args[-1], 260)
