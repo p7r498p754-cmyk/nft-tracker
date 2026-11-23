@@ -30,7 +30,7 @@ HELP = ("<b>NFT Tracker</b> ищет на Portals подарки дешевле 
 
 
 def _delay_note(cfg: Settings) -> str:
-    return ("\n\n⏳ Бот проверяет рынок по расписанию (примерно раз в 10–15 мин): ответы на команды "
+    return ("\n\n⏳ Бот проверяет рынок по расписанию (интервал 5 минут, возможны задержки): ответы на команды "
             "могут приходить с задержкой.") if cfg.on_actions else ""
 
 
@@ -54,6 +54,13 @@ def status_text(cfg: Settings, store: Storage, now: datetime) -> str:
         f"Продаж в истории оценки: {store.sales_count()}",
         f"Прямая ссылка на лот: {link}",
     ]
+    if "recipients" in meta:
+        if meta["recipients"] == 0:
+            lines.append("В последней успешной проверке не было получателей. Для подписки отправьте /start.")
+        else:
+            lines.append(f"Кандидатов в последней успешной проверке: {meta['candidates']}. "
+                         f"Не подтверждены при проверке цены и наличия: {meta['unverified']}. "
+                         f"Пропущены без ссылки: {meta['missing_link']}.")
     if cfg.on_actions:
         stamp = meta.get("scheduled_ok_at")
         if stamp:

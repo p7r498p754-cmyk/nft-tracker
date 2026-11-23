@@ -27,6 +27,7 @@ def utcnow() -> datetime:
 
 @dataclass
 class CycleReport:
+    recipients: int = 0
     listings: int = 0
     candidates: int = 0
     alerts: int = 0
@@ -129,6 +130,7 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
     retry_needed = False
     sales = store.sales()
     users = store.active_users()
+    rep.recipients = len(users)
     max_age = timedelta(minutes=cfg.max_event_age_min)
     verified: dict[tuple[str, Decimal], bool] = {}
     no_link_hits = 0
@@ -226,6 +228,8 @@ def _record(store: Storage, tg: TelegramClient, cfg: Settings, rep: CycleReport,
     else:
         if cfg.on_actions and cfg.github_event == "schedule":
             meta["scheduled_ok_at"] = iso(now)
-        meta.update(error=None, failures=0, ok_at=iso(now), listings=rep.listings, alerts=rep.alerts)
+        meta.update(error=None, failures=0, ok_at=iso(now), listings=rep.listings, alerts=rep.alerts,
+                    candidates=rep.candidates, unverified=rep.skipped_unverified, missing_link=rep.skipped_no_link,
+                    recipients=rep.recipients)
     meta["warning"] = rep.warning
     store.set("cycle", json.dumps(meta))
