@@ -1,17 +1,15 @@
 """Read collection floors from StarPrice. Only compare the same market and currency."""
 import html
 import json
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from .catalog import update_catalog
+from .catalog import fetch_catalog, update_catalog
 from .config import Settings
 from .portals import dec, parse_date
 from .storage import Storage
 from .telegram import TelegramClient
 
-URL = "https://starprice.net/api/v1/gifts"
 MARKETS = {"telegram": "STARS", "fragment": "GRAM"}
 MAX_AGE = timedelta(hours=3)
 
@@ -84,8 +82,7 @@ def main():
     cfg = Settings.from_env(need_portals=False)
     if cfg.setup_mode:
         return
-    with urllib.request.urlopen(URL, timeout=15) as response:
-        data = json.load(response)
+    data = fetch_catalog()
     store = Storage(cfg.db_path)
     try:
         count = refresh(store, TelegramClient(cfg.telegram_token), cfg, data, datetime.now(timezone.utc))

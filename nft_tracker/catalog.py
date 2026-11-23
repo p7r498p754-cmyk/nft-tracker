@@ -1,6 +1,7 @@
 """Periodic snapshot of collection-level prices for the owner's /prices menu."""
 import html
 import json
+import urllib.request
 from datetime import timedelta
 
 from .portals import dec, parse_date
@@ -8,6 +9,11 @@ from .portals import dec, parse_date
 PERIOD = timedelta(days=20)
 PAGE_SIZE = 8
 CURRENCIES = {"telegram": "STARS", "fragment": "GRAM", "portals": "GRAM"}
+
+
+def fetch_catalog():
+    with urllib.request.urlopen("https://starprice.net/api/v1/gifts", timeout=15) as response:
+        return json.load(response)
 
 
 def update_catalog(store, data, now):
@@ -40,7 +46,11 @@ def catalog_page(store, now, page=1, query=""):
     data = store.get_json("price_catalog")
     back = [{"text": "Меню", "callback_data": "menu:main"}]
     if not data:
-        return "Каталог ещё не загружен.", [back]
+        try:
+            update_catalog(store, fetch_catalog(), now)
+        except (OSError, ValueError):
+            return "Не удалось загрузить цены StarPrice. Попробуйте /prices позже.", [back]
+        data = store.get_json("price_catalog")
     at = parse_date(data["at"])
     rows = [r for r in data["rows"] if query.casefold() in r["name"].casefold()]
     pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)

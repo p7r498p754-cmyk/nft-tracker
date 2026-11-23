@@ -33,3 +33,16 @@ class ExitStatuses(unittest.TestCase):
         tg = FakeTelegram(fail={"send": TelegramError("temporary", 500)})
         tg.pending = [{"update_id": 1, "message": {"text": "/id", "chat": {"id": 777, "type": "private"}}}]
         self.assertFalse(cycle_once(cfg, Storage(":memory:"), tg, None))
+
+    def test_menu_listener_processes_pending_start(self):
+        from nft_tracker.__main__ import listen_for_commands
+        from tests.helpers import OWNER
+        cfg = make_settings()
+        store = Storage(":memory:")
+        self.addCleanup(store.close)
+        tg = FakeTelegram()
+        tg.pending = [{"update_id": 7, "message": {"text": "/start", "chat": {"id": OWNER, "type": "private"}}}]
+        with patch("nft_tracker.__main__.time.monotonic", side_effect=[0, 1, 91]):
+            self.assertTrue(listen_for_commands(cfg, store, tg, 90))
+        self.assertEqual(store.get("offset"), "8")
+        self.assertTrue(store.user("owner").active)
