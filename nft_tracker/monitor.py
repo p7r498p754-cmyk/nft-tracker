@@ -224,6 +224,8 @@ def _record(store: Storage, tg: TelegramClient, cfg: Settings, rep: CycleReport,
             _notice(store, tg, cfg, "portals_error",
                     f"⚠️ Мониторинг недоступен уже {failures} проверок подряд: {rep.error}", now)
     else:
+        if cfg.on_actions and cfg.github_event == "schedule":
+            meta["scheduled_ok_at"] = iso(now)
         meta.update(error=None, failures=0, ok_at=iso(now), listings=rep.listings, alerts=rep.alerts)
     meta["warning"] = rep.warning
     store.set("cycle", json.dumps(meta))

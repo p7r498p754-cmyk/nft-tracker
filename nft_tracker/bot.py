@@ -1,6 +1,7 @@
 """Telegram commands and inline menu."""
 from __future__ import annotations
 
+import html
 import json
 from datetime import datetime
 from typing import Any
@@ -53,6 +54,13 @@ def status_text(cfg: Settings, store: Storage, now: datetime) -> str:
         f"Продаж в истории оценки: {store.sales_count()}",
         f"Прямая ссылка на лот: {link}",
     ]
+    if cfg.on_actions:
+        stamp = meta.get("scheduled_ok_at")
+        if stamp:
+            minutes = max(0, int((now - datetime.fromisoformat(stamp)).total_seconds() // 60))
+            lines.append(f"Последняя успешная проверка по расписанию: {minutes} мин назад.")
+        else:
+            lines.append("В сохранённой истории пока нет подтверждённой проверки по расписанию.")
     if not cfg.listing_url_template and not cfg.allow_no_link_alerts:
         lines.append("⚠️ Без прямой ссылки из API сигналы не отправляются (см. README).")
     if store.get("sales_backfill_done") == "1":
@@ -63,9 +71,9 @@ def status_text(cfg: Settings, store: Storage, now: datetime) -> str:
     else:
         lines.append("История продаж: первичная загрузка ещё не завершена.")
     if error:
-        lines.append(f"⚠️ Последняя ошибка: {error}")
+        lines.append(f"⚠️ Последняя ошибка: {html.escape(error)}")
     if meta.get("warning"):
-        lines.append(f"⚠️ Неполная проверка: {meta['warning']}")
+        lines.append(f"⚠️ Неполная проверка: {html.escape(meta['warning'])}")
     lines.append("Telegram Market и Fragment: не подключены (нет разрешённого способа доступа).")
     return "\n".join(lines)
 

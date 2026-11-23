@@ -273,6 +273,17 @@ class CursorReliability(unittest.TestCase):
             monitor.run_cycle(cfg, store, tg, pt, NOW)
         self.assertEqual(listings.call_args.kwargs["since"], NOW - timedelta(minutes=cfg.max_event_age_min))
 
+    def test_only_successful_scheduled_scan_sets_schedule_time(self):
+        from nft_tracker.bot import status_text
+        cfg, store, tg, pt = setup(make_settings(on_actions=True, github_event="workflow_dispatch"))
+        monitor.run_cycle(cfg, store, tg, pt, NOW)
+        self.assertNotIn("scheduled_ok_at", store.get_json("cycle"))
+        scheduled = make_settings(on_actions=True, github_event="schedule")
+        monitor.run_cycle(scheduled, store, tg, pt, NOW)
+        later = NOW + timedelta(minutes=10)
+        monitor.run_cycle(cfg, store, tg, pt, later)
+        self.assertIn("по расписанию: 10 мин назад", status_text(cfg, store, later))
+
     def test_future_event_does_not_advance_checkpoint(self):
         future = ev(price="60", when=NOW + timedelta(days=12), link=LINK)
         cfg, store, tg, pt = setup(purchases=[], listings=[future])
