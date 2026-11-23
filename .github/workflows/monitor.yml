@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: "4-59/10 * * * *"     # about every 10 minutes (off the congested :00 slot)
   workflow_dispatch:
+    inputs:
+      check_delivery:
+        description: Send a single delivery check to the owner before scanning
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +34,24 @@ jobs:
           path: state
           key: nft-state-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: nft-state-
+      - name: Verify owner delivery
+        if: github.event_name == 'workflow_dispatch' && inputs.check_delivery
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: |
+          python - <<'PYTHON'
+          import os
+          from nft_tracker.telegram import TelegramClient
+          client = TelegramClient(os.environ["TELEGRAM_BOT_TOKEN"])
+          owner = int(os.environ["OWNER_CHAT_ID"])
+          if client.call("getMe").get("username", "").lower() != "nfttrecker_bot":
+              raise SystemExit("Unexpected bot identity")
+          msg = client.send(owner, "Проверка связи NFT Tracker. Это служебное сообщение. Для подписки на сигналы отправьте /start.")
+          if msg.get("chat", {}).get("id") != owner or not msg.get("message_id"):
+              raise SystemExit("Owner delivery unconfirmed")
+          print("Telegram accepted the owner message")
+          PYTHON
       - name: Run one monitoring cycle
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

@@ -46,6 +46,7 @@ def cycle_once(cfg: Settings, store: Storage, tg: TelegramClient, portals: Porta
         return command_ok
     if portals is None:
         raise ConfigError("Не задан PORTALS_API_KEY для мониторинга")
+    LOG.info("Активных получателей: %s", len(store.active_users()))
     rep = run_cycle(cfg, store, tg, portals)
     LOG.info("Проверка: объявлений=%s кандидатов=%s отправлено=%s без_ссылки=%s не_подтверждено=%s новых_продаж=%s",
              rep.listings, rep.candidates, rep.alerts, rep.skipped_no_link, rep.skipped_unverified, rep.new_sales)
