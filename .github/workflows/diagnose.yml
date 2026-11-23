@@ -1,0 +1,25 @@
+name: diagnose
+# Manual connectivity check. Prints field NAMES/types only (no secrets, prices or ids).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Diagnose
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PORTALS_API_KEY: ${{ secrets.PORTALS_API_KEY }}
+          PORTALS_PURCHASE_ACTION: ${{ vars.PORTALS_PURCHASE_ACTION }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+          PORTALS_LISTING_URL_TEMPLATE: ${{ vars.PORTALS_LISTING_URL_TEMPLATE }}
+        run: python -m nft_tracker diagnose

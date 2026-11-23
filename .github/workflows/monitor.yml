@@ -1,0 +1,49 @@
+name: monitor
+# Free hosting: GitHub Actions on a PUBLIC repository (standard runners are free there).
+# GitHub schedules are best-effort: runs can be delayed and are NOT real-time.
+on:
+  schedule:
+    - cron: "4-59/10 * * * *"     # about every 10 minutes (off the congested :00 slot)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nft-tracker-monitor
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    if: github.event.repository.private == false && (github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED == '1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Restore state (dedup, sales history, settings)
+        uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: nft-state-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: nft-state-
+      - name: Run one monitoring cycle
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          PORTALS_API_KEY: ${{ secrets.PORTALS_API_KEY }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+          PORTALS_LISTING_URL_TEMPLATE: ${{ vars.PORTALS_LISTING_URL_TEMPLATE }}
+          PORTALS_PURCHASE_ACTION: ${{ vars.PORTALS_PURCHASE_ACTION }}
+          PRICE_UNIT: ${{ vars.PRICE_UNIT }}
+          TIMEZONE: ${{ vars.TIMEZONE }}
+          LISTING_PAGES: ${{ vars.LISTING_PAGES }}
+          ALLOW_NO_LINK_ALERTS: ${{ vars.ALLOW_NO_LINK_ALERTS }}
+        run: python -m nft_tracker run
+      - name: Save state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state
+          key: nft-state-${{ github.run_id }}-${{ github.run_attempt }}
