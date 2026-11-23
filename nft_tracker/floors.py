@@ -5,6 +5,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from .catalog import update_catalog
 from .config import Settings
 from .portals import dec, parse_date
 from .storage import Storage
@@ -42,6 +43,7 @@ def observations(data, now):
 
 def refresh(store, tg, cfg, data, now):
     rows = observations(data, now)
+    update_catalog(store, data, now)
     previous = store.get_json("market_floors")
     user = store.user("owner")
     changes = []

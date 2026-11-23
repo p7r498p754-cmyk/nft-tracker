@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from . import __version__
+from .catalog import catalog_page
 from .config import Settings
 from .floors import floor_status
 from .storage import Storage
@@ -14,9 +15,10 @@ from .telegram import TelegramClient, TelegramError
 
 OWNER = "owner"
 DISCOUNT_CHOICES = (30, 40, 50)
-COMMANDS = {"/start", "/status", "/settings", "/stop", "/help", "/id", "/delete", "/markets"}
+COMMANDS = {"/start", "/status", "/settings", "/stop", "/help", "/id", "/delete", "/markets", "/prices"}
 
 MENU = [
+    [{"text": "Все цены подарков", "callback_data": "prices:1"}],
     [{"text": "Цены Telegram и Fragment", "callback_data": "menu:markets"}],
     [{"text": "📊 Статус", "callback_data": "menu:status"}, {"text": "⚙️ Настройки", "callback_data": "menu:settings"}],
     [{"text": "🔕 Выключить", "callback_data": "menu:stop"}, {"text": "🔔 Включить", "callback_data": "menu:start"}],
@@ -26,7 +28,7 @@ BACK = [[{"text": "⬅️ Меню", "callback_data": "menu:main"}]]
 
 HELP = ("<b>NFT Tracker</b> ищет на Portals подарки дешевле рыночной оценки (по недавним продажам) "
         "и присылает уведомление.\n\n"
-        "/start — включить уведомления\n/status — состояние\n/markets — цены Telegram и Fragment\n/settings — порог скидки\n"
+        "/start — включить уведомления\n/status — состояние\n/prices — каталог цен (обновление раз в 20 дней)\n/markets — цены Telegram и Fragment\n/settings — порог скидки\n"
         "/stop — выключить\n/id — ваш Telegram ID\n/delete — удалить мои данные\n\n"
         "Бот ничего не покупает и не просит ключи или пароли. Оценка не гарантирует прибыль.")
 
@@ -162,6 +164,13 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
     if chat != cfg.owner_chat_id:
         tg.send(chat, "🔒 NFT Tracker сейчас работает в закрытом режиме.")
         return
+    if command == "/prices":
+        args = str(msg["text"]).partition(" ")[2].strip()[:100]
+        number, _, rest = args.partition(" ")
+        has_page = number.isascii() and number.isdecimal()
+        text, kb = catalog_page(store, now, int(number) if has_page else 1, rest if has_page else args)
+        tg.send(chat, text, kb)
+        return
     if command == "/delete":
         text, kb = _screen(cfg, store, "delete", now)
         tg.send(chat, text, kb)
@@ -173,6 +182,12 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
 
 def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, edit_id: int | None,
                  data: str, now: datetime) -> None:
+    if data.startswith("prices:"):
+        number = data[7:]
+        if number.isascii() and number.isdecimal() and len(number) <= 8:
+            text, kb = catalog_page(store, now, int(number))
+            _reply(tg, chat, text, kb, edit_id)
+        return
     if data == "del:yes":
         store.delete_user(OWNER)
         _reply(tg, chat, "✅ Ваши настройки и история уведомлений удалены. /start — начать заново.", None, edit_id)
