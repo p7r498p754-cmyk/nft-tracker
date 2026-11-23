@@ -1,9 +1,11 @@
-"""CLI: python -m nft_tracker {run|loop|diagnose|commands}"""
+"""CLI: python -m nft_tracker {run|loop|diagnose|commands|serve-once}"""
 from __future__ import annotations
 
 import logging
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 from . import __version__
 from .bot import process_updates
@@ -43,9 +45,14 @@ def cycle_once(cfg: Settings, store: Storage, tg: TelegramClient, portals: Porta
     except TelegramError as e:
         LOG.warning("Команды не обработаны; повторим при следующем запуске: %s", e)
         command_ok = False
+    market_ok = scan_market(cfg, store, tg, portals)
+    return command_ok and market_ok
+
+
+def scan_market(cfg, store, tg, portals):
     if cfg.setup_mode:
         LOG.info("Режим настройки (OWNER_CHAT_ID=0): мониторинг выключен, работает только /id")
-        return command_ok
+        return True
     if portals is None:
         raise ConfigError("Не задан PORTALS_API_KEY для мониторинга")
     LOG.info("Активных получателей: %s", len(store.active_users()))
@@ -58,7 +65,7 @@ def cycle_once(cfg: Settings, store: Storage, tg: TelegramClient, portals: Porta
         LOG.warning("Предупреждение: %s", rep.warning)
     # A failed Portals scan must not appear as a green Actions run. State is
     # still saved by the workflow's `if: always()` cache step.
-    return command_ok and not bool(rep.error)
+    return not bool(rep.error)
 
 
 def listen_for_commands(cfg, store, tg, seconds):
@@ -80,28 +87,62 @@ def listen_for_commands(cfg, store, tg, seconds):
     return last_poll_ok
 
 
-def run_loop(cfg, store, tg, portals):
+def market_worker(cfg, portals, stop, once):
+    store = Storage(cfg.db_path)
+    tg = TelegramClient(cfg.telegram_token)
     next_floors = 0.0
-    while True:
-        started = time.monotonic()
-        cycle_once(cfg, store, tg, portals)
-        if not cfg.setup_mode and started >= next_floors:
-            try:
-                data = fetch_catalog()
-                count = refresh(store, tg, cfg, data, utcnow())
-                LOG.info("Свежих цен коллекций по площадкам: %s", count)
-            except (OSError, ValueError, TelegramError) as error:
-                LOG.warning("Обновление цен коллекций: %s", error)
-            next_floors = time.monotonic() + 300
-        remaining = started + cfg.scan_seconds - time.monotonic()
-        if remaining >= 1 and not listen_for_commands(cfg, store, tg, remaining):
-            return 1
+    try:
+        while not stop.is_set():
+            started = time.monotonic()
+            ok = scan_market(cfg, store, tg, portals)
+            if not cfg.setup_mode and started >= next_floors:
+                try:
+                    count = refresh(store, tg, cfg, fetch_catalog(), utcnow())
+                    LOG.info("Свежих цен коллекций по площадкам: %s", count)
+                except (OSError, ValueError, TelegramError) as error:
+                    LOG.warning("Обновление цен коллекций: %s", error)
+                    ok = False
+                next_floors = time.monotonic() + 300
+            if once:
+                return ok
+            stop.wait(max(0, started + cfg.scan_seconds - time.monotonic()))
+        return True
+    finally:
+        store.close()
+
+
+def run_loop(cfg, store, tg, portals, *, once=False):
+    stop = Event()
+    commands_ok = True
+    until = time.monotonic() + 90
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker = pool.submit(market_worker, cfg, portals, stop, once)
+        try:
+            while True:
+                if worker.done():
+                    market_ok = worker.result()
+                    if not once or time.monotonic() >= until:
+                        return 0 if market_ok and commands_ok else 1
+                try:
+                    process_updates(cfg, store, tg, utcnow(), timeout=5)
+                    commands_ok = True
+                except TelegramError as error:
+                    LOG.warning("Ошибка Telegram: %s", error)
+                    commands_ok = False
+                    if error.code in (401, 403, 409):
+                        return 1
+                    delay = error.retry_after if isinstance(error.retry_after, int) else 2
+                    if once and time.monotonic() + delay >= until:
+                        return 1
+                    time.sleep(max(1, delay))
+        finally:
+            stop.set()
 
 
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "run"
-    if cmd not in {"run", "loop", "diagnose", "commands"}:
-        print("Использование: python -m nft_tracker {run|loop|diagnose|commands}")
+    if cmd not in {"run", "loop", "diagnose", "commands", "serve-once"}:
+        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|serve-once}")
         return 2
     try:
         cfg = Settings.from_env(need_portals=cmd != "commands")
@@ -126,7 +167,7 @@ def main(argv: list[str]) -> int:
     try:
         if cmd == "run":
             return 0 if cycle_once(cfg, store, tg, portals) else 1
-        return run_loop(cfg, store, tg, portals)
+        return run_loop(cfg, store, tg, portals, once=cmd == "serve-once")
     except KeyboardInterrupt:
         return 0
     finally:

@@ -48,13 +48,38 @@ class ExitStatuses(unittest.TestCase):
         self.assertTrue(store.user("owner").active)
 
     def test_loop_refreshes_floors_and_subtracts_scan_time(self):
-        from nft_tracker.__main__ import run_loop
+        from threading import Event
+        from nft_tracker.__main__ import market_worker
+        stop = Event()
         cfg = make_settings(scan_seconds=300)
         with patch("nft_tracker.__main__.time.monotonic", side_effect=[10, 45, 50]), \
-             patch("nft_tracker.__main__.cycle_once"), \
+             patch("nft_tracker.__main__.scan_market"), \
              patch("nft_tracker.__main__.fetch_catalog", return_value={"gifts": []}), \
              patch("nft_tracker.__main__.refresh") as refresh, \
-             patch("nft_tracker.__main__.listen_for_commands", return_value=False) as listen:
-            self.assertEqual(run_loop(cfg, None, None, None), 1)
+             patch.object(stop, "wait", side_effect=lambda delay: stop.set()) as wait:
+            self.assertTrue(market_worker(cfg, None, stop, False))
         refresh.assert_called_once()
-        self.assertEqual(listen.call_args.args[-1], 260)
+        wait.assert_called_once_with(260)
+
+    def test_start_and_settings_during_blocked_scan(self):
+        from threading import Event
+        from nft_tracker.__main__ import run_loop
+        from tests.helpers import message, callback
+        started, replied = Event(), Event()
+        def slow_market(*args):
+            started.set()
+            return replied.wait(5)
+        class Menu(FakeTelegram):
+            def updates(self, offset, timeout=0):
+                if not started.wait(3):
+                    raise AssertionError("scan did not start")
+                return super().updates(offset, timeout)
+            def edit(self, *args):
+                super().edit(*args)
+                replied.set()
+        tg = Menu([message("/start"), callback("menu:settings", update_id=2)])
+        store = Storage(":memory:")
+        self.addCleanup(store.close)
+        with patch("nft_tracker.__main__.market_worker", side_effect=slow_market):
+            self.assertEqual(run_loop(make_settings(), store, tg, None), 0)
+        self.assertTrue(tg.sent and tg.edits and tg.callbacks)

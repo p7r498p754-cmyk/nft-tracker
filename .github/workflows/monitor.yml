@@ -69,21 +69,7 @@ jobs:
           TIMEZONE: ${{ vars.TIMEZONE }}
           LISTING_PAGES: ${{ vars.LISTING_PAGES }}
           ALLOW_NO_LINK_ALERTS: ${{ vars.ALLOW_NO_LINK_ALERTS }}
-        run: python -m nft_tracker run
-      - name: Read Telegram and Fragment collection floors
-        if: ${{ !cancelled() && steps.scan.outcome != 'skipped' && steps.scan.outcome != '' }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
-        run: python -m nft_tracker.floors
-      - name: Receive menu commands after the scan
-        if: ${{ !cancelled() && (steps.scan.outcome == 'success' || steps.scan.outcome == 'failure') }}
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
-          ALLOW_NO_LINK_ALERTS: ${{ vars.ALLOW_NO_LINK_ALERTS }}
-          PORTALS_LISTING_URL_TEMPLATE: ${{ vars.PORTALS_LISTING_URL_TEMPLATE }}
-        run: python -m nft_tracker commands
+        run: python -m nft_tracker serve-once
       - name: Save state
         if: always()
         uses: actions/cache/save@v4

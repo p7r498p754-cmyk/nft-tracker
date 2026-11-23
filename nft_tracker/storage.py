@@ -114,7 +114,8 @@ class Storage:
                                (user_key, signal_id)).fetchone() is not None
 
     def mark_sent(self, user_key: str, signal_id: str, now: datetime) -> None:
-        self.db.execute("INSERT OR IGNORE INTO deliveries VALUES (?,?,?)", (user_key, signal_id, iso(now)))
+        self.db.execute("INSERT OR IGNORE INTO deliveries SELECT user_key, ?, ? FROM users WHERE user_key=?",
+                        (signal_id, iso(now), user_key))
         self.db.commit()
 
     # --- sales history ---------------------------------------------------

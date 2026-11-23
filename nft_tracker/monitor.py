@@ -192,6 +192,8 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
             rep.skipped_unverified += 1
             continue
         sid = signal_id(sig)
+        if store.user(user.user_key) != user:
+            continue
         chat = user.chat_id if user.chat_id is not None else cfg.owner_chat_id
         try:
             _deliver(cfg, tg, chat, sig, link, now)
