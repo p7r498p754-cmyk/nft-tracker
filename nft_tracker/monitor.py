@@ -102,7 +102,9 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
                            "Для редких NFT может быть недостаточно сравнений.")
         elif callable(backfill) and not done and store.get("sales_backfill_done") != "1":
             rep.warning = ("История продаж ещё пополняется; оценки редких NFT пока ограничены.")
-        since = datetime.fromisoformat(store.get("last_listing_at", iso(now - timedelta(minutes=cfg.max_event_age_min))))
+        oldest_eligible = now - timedelta(minutes=cfg.max_event_age_min)
+        previous = store.get("last_listing_at")
+        since = max(oldest_eligible, datetime.fromisoformat(previous)) if previous else oldest_eligible
         listings = portals.listings(pages=cfg.listing_pages, since=since)
         if getattr(portals, "last_events_truncated", False):
             msg = ("Лента Portals оказалась длиннее проверенных страниц. "
@@ -201,7 +203,7 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         store.mark_sent(user.user_key, sid, now)
         rep.alerts += 1
 
-    if complete and not retry_needed and checkpoint is not None:
+    if complete and not retry_needed and checkpoint is not None and checkpoint >= since:
         store.set("last_listing_at", iso(checkpoint))
 
     if no_link_hits:

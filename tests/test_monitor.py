@@ -265,6 +265,14 @@ class CursorReliability(unittest.TestCase):
         monitor.run_cycle(cfg, store, tg, pt, NOW)
         self.assertEqual(store.get("last_listing_at"), original)
 
+    def test_stale_checkpoint_only_scans_eligible_window(self):
+        cfg, store, tg, pt = setup(listings=[])
+        store.set("last_listing_at", (NOW - timedelta(days=2)).isoformat())
+        from unittest.mock import patch
+        with patch.object(pt, "listings", wraps=pt.listings) as listings:
+            monitor.run_cycle(cfg, store, tg, pt, NOW)
+        self.assertEqual(listings.call_args.kwargs["since"], NOW - timedelta(minutes=cfg.max_event_age_min))
+
     def test_future_event_does_not_advance_checkpoint(self):
         future = ev(price="60", when=NOW + timedelta(days=12), link=LINK)
         cfg, store, tg, pt = setup(purchases=[], listings=[future])

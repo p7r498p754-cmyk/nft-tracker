@@ -79,7 +79,7 @@ def parse_event(action: Any, link_template: str = "") -> MarketEvent | None:
 
 
 class PortalsClient:
-    def __init__(self, api_key: str, *, link_template: str = "", purchase_action: str = "purchase",
+    def __init__(self, api_key: str, *, link_template: str = "", purchase_action: str = "buy",
                  min_gap: float = 1.15, opener: Callable[..., Any] | None = None,
                  sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic):
@@ -157,6 +157,9 @@ class PortalsClient:
         self.last_events_truncated = False
         page_count = max(1, min(pages, (MAX_OFFSET - start_offset) // PAGE + 1))
         reached_checkpoint = False
+        expected_types = set(actions)
+        if expected_types.intersection({"buy", "purchase"}):
+            expected_types.update({"buy", "purchase"})
         for i in range(page_count):
             data = self.get("/market/actions/", {"action_types": actions, "limit": PAGE,
                                                   "offset": start_offset + i * PAGE, "sort_by": "created_at desc"})
@@ -169,7 +172,7 @@ class PortalsClient:
                 if item is None:
                     # An incomplete or changed API schema must not silently
                     # advance the checkpoint and hide potentially cheap lots.
-                    if isinstance(raw, dict) and raw.get("type") in actions:
+                    if isinstance(raw, dict) and raw.get("type") in expected_types:
                         raise PortalsError("Portals: запись рыночной ленты не распознана; "
                                            "нужна проверка формата API")
                     continue

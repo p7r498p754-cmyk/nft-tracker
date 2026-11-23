@@ -40,7 +40,7 @@ class Settings:
     price_unit: str = "GRAM"
     timezone: str = "UTC"
     listing_url_template: str = ""
-    purchase_action: str = "purchase"
+    purchase_action: str = "buy"
     max_event_age_min: int = 45
     default_discount: int = 30
     model_extra_margin: Decimal = Decimal("10")
@@ -81,7 +81,7 @@ class Settings:
             price_unit=(env.get("PRICE_UNIT", "GRAM").strip() or "GRAM")[:12],
             timezone=env.get("TIMEZONE", "UTC").strip() or "UTC",
             listing_url_template=template,
-            purchase_action=env.get("PORTALS_PURCHASE_ACTION", "purchase").strip() or "purchase",
+            purchase_action=env.get("PORTALS_PURCHASE_ACTION", "buy").strip() or "buy",
             max_event_age_min=_int(env, "MAX_EVENT_AGE_MIN", 45, 5, 720),
             default_discount=_int(env, "DEFAULT_DISCOUNT", 30, 30, 90),
             model_extra_margin=margin,

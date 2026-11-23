@@ -48,6 +48,13 @@ class HistoricalAPI(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertIn("offset=700", calls[0].full_url)
 
+    def test_default_sales_filter_and_malformed_purchase(self):
+        broken = {**RAW, "type": "purchase", "amount": None}
+        c, calls, _ = client([json_response({"actions": [broken]})])
+        with self.assertRaises(PortalsError):
+            c.purchases(pages=1)
+        self.assertIn("action_types=buy", calls[0].full_url)
+
     def test_start_offset_validation(self):
         c, calls, _ = client([])
         for offset in (-20, 701, 1, 19):
