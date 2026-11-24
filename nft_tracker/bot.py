@@ -106,6 +106,12 @@ def status_text(cfg: Settings, store: Storage, now: datetime, key=OWNER) -> str:
         f"Продаж в истории оценки: {store.sales_count()}",
         f"Прямая ссылка на лот: {link}",
     ]
+    if "interval_seconds" in meta:
+        lines.append(f"Фактический интервал последних двух успешных проверок Portals: {meta['interval_seconds']} с.")
+    if cfg.closed_beta:
+        tick = store.db.execute("SELECT at FROM beta_ticks WHERE user_key=?", (key,)).fetchone()
+        age = f"{max(0, int(now.timestamp()) - tick[0])} с назад" if tick else "ожидается"
+        lines.append(f"Проверка для вашего тарифа: {age}. Цель: {beta.MINUTES[current_plan]} мин.")
     if "recipients" in meta:
         if meta["recipients"] == 0:
             lines.append("В последней успешной проверке не было получателей. Для подписки отправьте /start.")
@@ -247,6 +253,12 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
             ok = (len(args) == 3 and args[1].isascii() and args[1].isdigit() and len(args[1]) <= 16
                   and beta.invite(store, int(args[1]), args[2].upper(), int(now.timestamp()) + 30*86400))
             tg.send(chat, "Доступ на 30 дней сохранён." if ok else "Формат: /invite ID FREE|PLUS|PRO|ULTRA. До 20 участников.")
+            return
+        if command == "/feedback" and chat == cfg.owner_chat_id:
+            rows = store.db.execute("SELECT text FROM beta_feedback ORDER BY uid").fetchall()
+            # Bound the raw text before escaping to stay inside Telegram's rendered text limit.
+            text = "\n\n".join(row[0][:160] for row in rows)
+            tg.send(chat, html.escape(text) if text else "Отзывов пока нет.")
             return
         if command == "/feedback" and chat != cfg.owner_chat_id:
             note = " ".join(args[1:])[:1000]

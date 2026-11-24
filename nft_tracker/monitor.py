@@ -269,6 +269,8 @@ def _record(store: Storage, tg: TelegramClient, cfg: Settings, rep: CycleReport,
     else:
         if cfg.on_actions and cfg.github_event == "schedule":
             meta["scheduled_ok_at"] = iso(now)
+        if meta.get("ok_at"):
+            meta["interval_seconds"] = int((now - datetime.fromisoformat(meta["ok_at"])).total_seconds())
         meta.update(error=None, failures=0, ok_at=iso(now), listings=rep.listings, alerts=rep.alerts,
                     candidates=rep.candidates, unverified=rep.skipped_unverified, missing_link=rep.skipped_no_link,
                     recipients=rep.recipients)

@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from .beta import allowed
 from .catalog import fetch_catalog, update_catalog
 from .config import Settings
 from .service import effective_access, prefs, limits, threshold
@@ -55,6 +56,8 @@ def refresh(store, tg, cfg, data, now):
         previous[key] = row
     for user in store.active_users():
         uid = user.chat_id or cfg.owner_chat_id
+        if cfg.closed_beta and not allowed(cfg, store, uid):
+            continue
         name = effective_access(cfg, store, uid, int(now.timestamp()))[0]
         plan = PLANS[name]
         settings = prefs(store, user.user_key)
