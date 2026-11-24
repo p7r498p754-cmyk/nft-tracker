@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from time import monotonic
 from datetime import datetime, timedelta
@@ -10,11 +11,13 @@ from typing import Any
 from . import __version__
 from .service import effective_access, prefs, threshold, view, SUB
 from .subscriptions import PLANS
+from .payments import answer_checkout, create_invoice, settle_receipt
 from .config import Settings
 from .floors import floor_status
 from .storage import Storage
 from .telegram import TelegramClient, TelegramError
 
+LOG = logging.getLogger(__name__)
 OWNER = "owner"
 DISCOUNT_CHOICES = (30, 40, 50)
 COMMAND_HINTS = {
@@ -182,6 +185,10 @@ def _screen(cfg: Settings, store: Storage, action: str, now: datetime, key=OWNER
 
 
 def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dict, now: datetime) -> None:
+    query = update.get("pre_checkout_query")
+    if isinstance(query, dict):
+        answer_checkout(cfg, store, tg, query, int(now.timestamp()))
+        return
     msg: dict[str, Any] | None = update.get("message")
     cb: dict[str, Any] | None = update.get("callback_query")
     if cb:
@@ -209,6 +216,18 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
     chat = chat_obj.get("id")
     if chat_obj.get("type") != "private" or not isinstance(chat, int):
         return
+    if "successful_payment" in msg or "refunded_payment" in msg:
+        refund = "refunded_payment" in msg
+        receipt = msg.get("refunded_payment" if refund else "successful_payment")
+        if isinstance(receipt, dict) and (refund or (msg.get("from") or {}).get("id") == chat):
+            try:
+                plan = settle_receipt(store.db, chat, receipt, msg.get("date"), refund=refund)
+            except ValueError:
+                LOG.error("Telegram receipt has invalid term fields")
+            else:
+                if plan:
+                    tg.send(chat, f"Оплата подтверждена. Доступ {plan} на 30 дней. /subscription · /paysupport")
+        return
     if msg.get("from") and msg["from"].get("id") != chat:
         return
     command = str(msg.get("text") or "").split(" ")[0].split("@")[0].lower()
@@ -234,7 +253,9 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         tg.send(chat, text)
         return
     if command == "/paysupport":
-        tg.send(chat, "Оплата в NFT Tracker отключена. По вопросам платежей обратитесь к владельцу сервиса.")
+        text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции Telegram."
+                if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
+        tg.send(chat, text)
         return
     if command in SERVICE or command == "/prices":
         args = str(msg.get("text", "")).partition(" ")[2].strip()[:150]
@@ -254,6 +275,16 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
                  data: str, now: datetime) -> None:
     key = OWNER if chat == cfg.owner_chat_id else str(chat)
     uid = chat
+    if data.startswith("buy:"):
+        plan = data.removeprefix("buy:")
+        if not cfg.stars_payments or not cfg.public_users or cfg.on_actions or plan not in PLANS or not PLANS[plan].price:
+            tg.send(chat, "Счёт на этот тариф недоступен.")
+        elif (chat == cfg.owner_chat_id and cfg.owner_lifetime_ultra
+              or effective_access(cfg, store, chat, int(now.timestamp()))[0] != "FREE"):
+            tg.send(chat, "У вас уже есть доступ. Тариф можно выбрать после окончания текущего периода.")
+        else:
+            create_invoice(store.db, tg, chat, plan, int(now.timestamp()))
+        return
     if data.startswith(("sub:", "admin:")):
         prefix, arg = data.split(":", 1)
         text, kb = view(cfg, store, tg, chat, key, "/subscription" if prefix == "sub" else "/admin", arg, now)

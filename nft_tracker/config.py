@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import os
+import re
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -51,6 +53,9 @@ class Settings:
     github_event: str = ""
     public_users: bool = False
     owner_lifetime_ultra: bool = False
+    stars_payments: bool = False
+    stars_support: str = ""
+    stars_terms: str = ""
 
     @property
     def setup_mode(self) -> bool:
@@ -78,9 +83,25 @@ class Settings:
             raise ConfigError("MODEL_EXTRA_MARGIN должен быть числом") from None
         if not margin.is_finite() or not Decimal(0) <= margin <= Decimal(50):
             raise ConfigError("MODEL_EXTRA_MARGIN должен быть в диапазоне 0..50")
+        db_path = Path(env.get("DB_PATH", "state/tracker.sqlite3"))
+        stars_payments = _flag(env, "STARS_PAYMENTS")
+        support = env.get("STARS_SUPPORT", "").strip().removeprefix("@")
+        terms = env.get("STARS_TERMS_URL", "").strip()
+        if stars_payments:
+            if _flag(env, "GITHUB_ACTIONS") or not _flag(env, "PUBLIC_USERS") or int(owner) == 0 or str(db_path) == ":memory:":
+                raise ConfigError("Оплате требуется непрерывный запуск с приватной базой и PUBLIC_USERS=1")
+            if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", support):
+                raise ConfigError("Задайте Telegram username поддержки в STARS_SUPPORT")
+            try:
+                url = urlsplit(terms)
+                if url.scheme != "https" or not url.hostname or url.username or url.password:
+                    raise ValueError
+            except ValueError:
+                raise ConfigError("Задайте HTTPS-ссылку на условия покупки в STARS_TERMS_URL") from None
         return cls(
             telegram_token=token, portals_key=key, owner_chat_id=int(owner),
-            db_path=Path(env.get("DB_PATH", "state/tracker.sqlite3")),
+            db_path=db_path,
+            stars_payments=stars_payments, stars_support=support, stars_terms=terms,
             price_unit=(env.get("PRICE_UNIT", "GRAM").strip() or "GRAM")[:12],
             timezone=env.get("TIMEZONE", "UTC").strip() or "UTC",
             listing_url_template=template,

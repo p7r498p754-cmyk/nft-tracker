@@ -97,7 +97,7 @@ class TelegramClient:
         return self.call("answerCallbackQuery", {"callback_query_id": callback_id}, timeout=2)
 
     def updates(self, offset: int, timeout: int = 0) -> list[dict]:
-        payload = {"offset": offset, "timeout": timeout, "allowed_updates": ["message", "callback_query"]}
+        payload = {"offset": offset, "timeout": timeout, "allowed_updates": ["message", "callback_query", "pre_checkout_query"]}
         try:
             result = self.call("getUpdates", payload, timeout=TIMEOUT + timeout)
         except TelegramError as error:

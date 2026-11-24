@@ -66,10 +66,11 @@ def fits(event, settings, plan):
     return not (plan.level >= 3 and event.name.casefold() in settings.get("exclude", []))
 
 
-def menu(store, name, end, preview=False):
+def menu(store, name, end, preview=False, *, sales_enabled=False):
     until = datetime.fromtimestamp(end, timezone.utc).strftime("%d.%m.%Y %H:%M UTC") if end else "бессрочно"
     lines = ["⭐ <b>Подписка NFT Tracker</b>", f"Ваш тариф: <b>{name}</b> · {until}",
-             "Автопродление выключено. Платные планы открыты для ознакомления.", ""]
+             ("Разовая оплата Stars. Автопродление выключено." if sales_enabled else
+              "Автопродление выключено. Платные планы открыты для ознакомления."), ""]
     if preview:
         lines.insert(2, "Тестовый доступ владельца · без оплаты.")
     elif name == "ULTRA" and end is None:
@@ -128,7 +129,7 @@ def admin(cfg, store, tg, uid, action, now):
         names = Counter(entitlement(store.db, u or uid, int(now.timestamp()))[0] for u, in store.db.execute("SELECT chat_id FROM users"))
         return f"Пользователей: {sum(names.values())} · с активным платным доступом: {sum(names.values())-names['FREE']}\n" + " · ".join(f"{n}: {names[n]}" for n in PLANS), keyboard
     if action == "income":
-        lines = ["<b>Доход NFT Tracker</b>", "Приём платежей выключен. Живые платные подписки сервиса не оформляются.",
+        lines = ["<b>Доход NFT Tracker</b>", ("Разовая оплата Stars включена." if cfg.stars_payments else "Приём новых платежей выключен."),
                  "Отправка подарков выключена. Использование для вознаграждения владельца не подтверждено."]
         try:
             b = tg.call("getMyStarBalance", timeout=4)
@@ -161,8 +162,16 @@ def admin(cfg, store, tg, uid, action, now):
                         "SELECT at,category,amount FROM star_operations ORDER BY at DESC LIMIT 5"):
                     lines.append(datetime.fromtimestamp(stamp, timezone.utc).strftime("%d.%m %H:%M UTC") +
                                  f" · {category} · {amount} ⭐")
-                lines.append("Подтверждённых продаж тарифов этой версии: 0. PLUS 0 · PRO 0 · ULTRA 0 ⭐. "
-                             "Сторонние поступления к тарифам не приписываются.")
+                revenue = {plan: (count, total) for plan, count, total in store.db.execute("""
+                    SELECT o.plan, count(*), sum(o.amount) FROM star_terms t
+                    JOIN star_checkouts c ON c.completed_charge=t.charge
+                    JOIN star_orders o ON o.payload=t.payload
+                    LEFT JOIN star_refunds r ON r.charge=t.charge WHERE r.charge IS NULL GROUP BY o.plan
+                    """)}
+                lines.append("Подтверждённые продажи тарифов после возвратов:")
+                for tier in ("PLUS", "PRO", "ULTRA"):
+                    count, total = revenue.get(tier, (0, 0))
+                    lines.append(f"{tier} · {count} оплат · {total} ⭐")
         except (TelegramError, KeyError, ValueError, TypeError, OverflowError):
             lines.append("Полные данные Telegram о балансе и операциях сейчас недоступны.")
         return "\n".join(lines), keyboard
@@ -208,9 +217,15 @@ def view(cfg, store, tg, uid, key, command, args, now):
         return admin(cfg, store, tg, uid, args or "menu", now)
     if command == "/subscription":
         if args in PLANS:
-            return (f"<b>{args}</b> · {PLANS[args].price} ⭐\n{DETAILS[args]}\n"
-                    "Списание и продление отключены. Смена платного тарифа предусмотрена после окончания оплаченного периода."), SUB
-        return menu(store, name, end, preview)
+            price = PLANS[args].price
+            text = f"<b>{args}</b> · {price} ⭐\n{DETAILS[args]}"
+            if (cfg.stars_payments and cfg.public_users and not cfg.on_actions and price and name == "FREE"
+                    and not (uid == cfg.owner_chat_id and cfg.owner_lifetime_ultra)):
+                button = {"text": f"Получить счёт на {price} ⭐", "callback_data": "buy:" + args}
+                terms = {"text": "Условия оплаты", "url": cfg.stars_terms}
+                return text + "\nРазовый платёж за 30 дней доступа. Поддержка: /paysupport.", [[button], [terms], *SUB]
+            return text + "\nУправление доступом — /subscription.", SUB
+        return menu(store, name, end, preview, sales_enabled=cfg.stars_payments)
     if command == "/prices":
         fields = args.split()
         page = int(fields.pop(0)) if fields and fields[0].isascii() and fields[0].isdecimal() else 1
