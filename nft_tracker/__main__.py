@@ -10,7 +10,7 @@ from threading import Event
 from . import __version__
 from .bot import process_updates
 from .config import ConfigError, Settings
-from .catalog import fetch_catalog
+from .catalog import fetch_catalog, refresh_catalog_if_due
 from .floors import refresh
 from .monitor import run_cycle, utcnow
 from .portals import PortalsClient, PortalsError
@@ -88,6 +88,18 @@ def listen_for_commands(cfg, store, tg, seconds):
     return last_poll_ok
 
 
+def warm_catalog(cfg):
+    if cfg.setup_mode:
+        return
+    store = Storage(cfg.db_path)
+    try:
+        refresh_catalog_if_due(store, utcnow())
+    except (OSError, ValueError) as error:
+        LOG.warning("Загрузка каталога цен: %s", error)
+    finally:
+        store.close()
+
+
 def market_worker(cfg, portals, stop, once):
     store = Storage(cfg.db_path)
     tg = TelegramClient(cfg.telegram_token)
@@ -161,13 +173,19 @@ def main(argv: list[str]) -> int:
     if cmd == "commands":
         store = Storage(cfg.db_path)
         try:
-            return 0 if listen_for_commands(cfg, store, TelegramClient(cfg.telegram_token), ACTION_LISTEN_SECONDS) else 1
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                catalog = pool.submit(warm_catalog, cfg)
+                ok = listen_for_commands(cfg, store, TelegramClient(cfg.telegram_token), ACTION_LISTEN_SECONDS)
+                catalog.result()
+                return 0 if ok else 1
         finally:
             store.close()
     store, tg, portals = _make(cfg)
     try:
         if cmd == "run":
-            return 0 if cycle_once(cfg, store, tg, portals) else 1
+            ok = cycle_once(cfg, store, tg, portals)
+            warm_catalog(cfg)
+            return 0 if ok else 1
         return run_loop(cfg, store, tg, portals, once=cmd == "serve-once")
     except KeyboardInterrupt:
         return 0
