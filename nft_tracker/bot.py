@@ -16,7 +16,7 @@ from .telegram import TelegramClient, TelegramError
 
 OWNER = "owner"
 DISCOUNT_CHOICES = (30, 40, 50)
-COMMANDS = {"/start", "/status", "/settings", "/stop", "/help", "/id", "/delete", "/markets", "/prices"}
+COMMANDS = {"/ping", "/start", "/status", "/settings", "/stop", "/help", "/id", "/delete", "/markets", "/prices"}
 
 SERVICE = {"/gift", "/subscription", "/admin", "/favorite", "/filter", "/summary", "/analytics", "/report", "/export", "/paysupport"}
 COMMANDS |= SERVICE
@@ -33,7 +33,7 @@ BACK = [[{"text": "⬅️ Меню", "callback_data": "menu:main"}]]
 
 HELP = ("<b>NFT Tracker</b> ищет на Portals подарки дешевле рыночной оценки (по недавним продажам) "
         "и присылает уведомление.\n\n"
-        "/start — включить уведомления\n/status — состояние\n/prices — каталог цен (обновление раз в 5 дней)\n/markets — цены Telegram и Fragment\n/settings — порог скидки\n"
+        "/ping — проверить задержку\n/start — включить уведомления\n/status — состояние\n/prices — каталог цен (обновление раз в 5 дней)\n/markets — цены Telegram и Fragment\n/settings — порог скидки\n"
         "/gift Название — карточка коллекции · /subscription — тарифы · /favorite — избранное · /filter — фильтры\n/summary — сводка · /analytics — аналитика · /report — отчёт · /export — CSV\n/stop — выключить\n/id — ваш Telegram ID\n/delete — удалить мои данные\n\n"
         "Бот ничего не покупает и не просит ключи или пароли. Оценка не гарантирует прибыль.")
 
@@ -112,8 +112,12 @@ def _reply(tg: TelegramClient, chat: int, text: str, keyboard: list | None, edit
         try:
             tg.edit(chat, edit_id, text, keyboard)
             return
-        except TelegramError:
-            pass  # e.g. "message is not modified" -> send a fresh message instead
+        except TelegramError as error:
+            if error.code != 400:
+                raise
+            if "message is not modified" in str(error).lower():
+                return
+            # The original message may have been deleted or cannot be edited.
     tg.send(chat, text, keyboard)
 
 
@@ -179,6 +183,14 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         tg.send(chat, "🔒 NFT Tracker сейчас работает в закрытом режиме.")
         return
     key = OWNER if chat == cfg.owner_chat_id else str(chat)
+    if command == "/ping":
+        sent = msg.get("date")
+        if type(sent) is int and 0 < sent <= now.timestamp():
+            text = f"На связи. От отправки команды до начала обработки прошло около {int(now.timestamp()) - sent} с."
+        else:
+            text = "На связи. Время отправки команды недоступно."
+        tg.send(chat, text)
+        return
     if command == "/paysupport":
         tg.send(chat, "Оплата в NFT Tracker отключена. По вопросам платежей обратитесь к владельцу сервиса.")
         return

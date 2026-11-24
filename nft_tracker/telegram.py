@@ -94,7 +94,7 @@ class TelegramClient:
         return self.call("editMessageText", payload)
 
     def answer_callback(self, callback_id: str) -> Any:
-        return self.call("answerCallbackQuery", {"callback_query_id": callback_id})
+        return self.call("answerCallbackQuery", {"callback_query_id": callback_id}, timeout=2)
 
     def updates(self, offset: int, timeout: int = 0) -> list[dict]:
         payload = {"offset": offset, "timeout": timeout, "allowed_updates": ["message", "callback_query"]}
