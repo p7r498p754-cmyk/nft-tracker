@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import html
 import json
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from time import monotonic
 from typing import Any
 
 from . import __version__
@@ -145,13 +147,20 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         edit_id = (cb.get("message") or {}).get("message_id")
         data = str(cb.get("data") or "")
         sender = (cb.get("from") or {}).get("id")
-        try:
-            tg.answer_callback(str(cb.get("id", "")))
-        except TelegramError:
-            pass
+        def acknowledge():
+            try:
+                tg.answer_callback(str(cb.get("id", "")))
+            except TelegramError:
+                pass
+
         if not isinstance(chat, int) or sender != cfg.owner_chat_id or chat != cfg.owner_chat_id:
+            acknowledge()
             return
-        _on_callback(cfg, store, tg, chat, edit_id, data, now)
+        # Telegram can clear the spinner while the main thread renders the screen.
+        # SQLite stays on its owning thread.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(acknowledge)
+            _on_callback(cfg, store, tg, chat, edit_id, data, now)
         return
     if not msg:
         return
@@ -225,6 +234,7 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
 
 
 def process_updates(cfg: Settings, store: Storage, tg: TelegramClient, now: datetime, timeout: int = 0) -> int:
+    started = monotonic()
     offset = int(store.get("offset", "0") or 0)
     updates = tg.updates(offset, timeout)
     for u in updates:
@@ -234,7 +244,7 @@ def process_updates(cfg: Settings, store: Storage, tg: TelegramClient, now: date
         # A retry can duplicate a reply if Telegram accepted it but the
         # network failed before confirming; that tradeoff is documented.
         try:
-            handle_update(cfg, store, tg, u, now)
+            handle_update(cfg, store, tg, u, now + timedelta(seconds=monotonic() - started))
         except TelegramError as e:
             if e.code not in (400, 403):
                 raise  # server failure / rate limit: retry the command next run
