@@ -19,6 +19,7 @@ from .storage import Storage
 from .telegram import TelegramClient, TelegramError
 
 LOG = logging.getLogger("nft_tracker")
+ACTION_LISTEN_SECONDS = 300
 
 
 def _setup_logging(cfg: Settings) -> None:
@@ -114,7 +115,7 @@ def market_worker(cfg, portals, stop, once):
 def run_loop(cfg, store, tg, portals, *, once=False):
     stop = Event()
     commands_ok = True
-    until = time.monotonic() + 90
+    until = time.monotonic() + ACTION_LISTEN_SECONDS
     with ThreadPoolExecutor(max_workers=1) as pool:
         worker = pool.submit(market_worker, cfg, portals, stop, once)
         try:
@@ -160,7 +161,7 @@ def main(argv: list[str]) -> int:
     if cmd == "commands":
         store = Storage(cfg.db_path)
         try:
-            return 0 if listen_for_commands(cfg, store, TelegramClient(cfg.telegram_token), 90) else 1
+            return 0 if listen_for_commands(cfg, store, TelegramClient(cfg.telegram_token), ACTION_LISTEN_SECONDS) else 1
         finally:
             store.close()
     store, tg, portals = _make(cfg)

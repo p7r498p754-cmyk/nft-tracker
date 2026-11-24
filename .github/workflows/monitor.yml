@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   scan:
-    if: github.event.repository.private == false && (github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED == '1')
+    if: github.event.repository.private == false
     runs-on: ubuntu-latest
     timeout-minutes: 9
     steps:
@@ -57,7 +57,14 @@ jobs:
               raise SystemExit("Owner delivery unconfirmed")
           print("Telegram accepted the owner message")
           PYTHON
+      - name: Listen for Telegram commands while monitoring is disabled
+        if: github.event_name != 'workflow_dispatch' && vars.MONITOR_ENABLED != '1'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python -m nft_tracker commands
       - name: Run one monitoring cycle
+        if: github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED == '1'
         id: scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
