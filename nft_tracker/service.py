@@ -29,6 +29,8 @@ def effective_access(cfg, store, uid, now):
         name, end = trial.get("plan"), trial.get("end")
         if name in PLANS and type(end) is int and end > now:
             return name, end, True
+        if cfg.owner_lifetime_ultra:
+            return "ULTRA", None, False
     name, end = entitlement(store.db, uid, now)
     return name, end, False
 
@@ -70,6 +72,8 @@ def menu(store, name, end, preview=False):
              "Автопродление выключено. Платные планы открыты для ознакомления.", ""]
     if preview:
         lines.insert(2, "Тестовый доступ владельца · без оплаты.")
+    elif name == "ULTRA" and end is None:
+        lines.insert(2, "Доступ владельца · без оплаты.")
     buttons = []
     for tier, plan in PLANS.items():
         cost = f"{plan.price} ⭐ / 30 дней" if plan.price else "бесплатно"

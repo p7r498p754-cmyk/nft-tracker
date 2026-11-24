@@ -50,6 +50,7 @@ class Settings:
     on_actions: bool = False
     github_event: str = ""
     public_users: bool = False
+    owner_lifetime_ultra: bool = False
 
     @property
     def setup_mode(self) -> bool:
@@ -90,6 +91,7 @@ class Settings:
             allow_no_link_alerts=_flag(env, "ALLOW_NO_LINK_ALERTS"),
             scan_seconds=_int(env, "SCAN_SECONDS", 600, 60, 86400),
             listing_pages=_int(env, "LISTING_PAGES", 12, 1, 36),
+            owner_lifetime_ultra=_flag(env, "OWNER_LIFETIME_ULTRA"),
             public_users=_flag(env, "PUBLIC_USERS") and not _flag(env, "GITHUB_ACTIONS") and int(owner) > 0,
             github_event=env.get("GITHUB_EVENT_NAME", ""),
             on_actions=env.get("GITHUB_ACTIONS", "").lower() == "true",
