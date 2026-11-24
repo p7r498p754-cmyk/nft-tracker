@@ -241,6 +241,8 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
     if msg.get("from") and msg["from"].get("id") != chat:
         return
     command = str(msg.get("text") or "").split(" ")[0].split("@")[0].lower()
+    if str(msg.get("text") or "").strip().casefold() == "start":
+        command = "/start"
     if command == "/admin" and (msg.get("from") or {}).get("id") != chat:
         return
     if cfg.closed_beta:
