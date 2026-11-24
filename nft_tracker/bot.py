@@ -37,6 +37,7 @@ COMMAND_HINTS = {
     "ping": "Проверить время ожидания команды",
     "stop": "Выключить уведомления",
     "help": "Открыть справку",
+    "terms": "Открыть условия оплаты",
     "paysupport": "Получить помощь по платежам",
     "id": "Узнать свой Telegram ID",
     "delete": "Удалить данные с подтверждением",
@@ -252,8 +253,12 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
             text = "На связи. Время отправки команды недоступно."
         tg.send(chat, text)
         return
+    if command == "/terms":
+        terms = [[{"text": "Открыть условия покупки", "url": cfg.stars_terms}]] if cfg.stars_terms else None
+        tg.send(chat, "Условия разовой оплаты подписки." if terms else "Условия оплаты пока не опубликованы.", terms)
+        return
     if command == "/paysupport":
-        text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции Telegram."
+        text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции. Обращения по покупкам принимает поддержка NFT Tracker."
                 if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
         tg.send(chat, text)
         return

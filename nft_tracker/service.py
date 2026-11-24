@@ -221,9 +221,9 @@ def view(cfg, store, tg, uid, key, command, args, now):
             text = f"<b>{args}</b> · {price} ⭐\n{DETAILS[args]}"
             if (cfg.stars_payments and cfg.public_users and not cfg.on_actions and price and name == "FREE"
                     and not (uid == cfg.owner_chat_id and cfg.owner_lifetime_ultra)):
-                button = {"text": f"Получить счёт на {price} ⭐", "callback_data": "buy:" + args}
+                button = {"text": f"Принимаю условия · счёт на {price} ⭐", "callback_data": "buy:" + args}
                 terms = {"text": "Условия оплаты", "url": cfg.stars_terms}
-                return text + "\nРазовый платёж за 30 дней доступа. Поддержка: /paysupport.", [[button], [terms], *SUB]
+                return text + "\nРазовый платёж за 30 дней доступа. Поддержка: /paysupport.", [[terms], [button], *SUB]
             return text + "\nУправление доступом — /subscription.", SUB
         return menu(store, name, end, preview, sales_enabled=cfg.stars_payments)
     if command == "/prices":

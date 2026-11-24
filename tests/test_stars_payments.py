@@ -87,3 +87,12 @@ class StarsPayments(TestCase):
             Settings.from_env({"TELEGRAM_BOT_TOKEN": "test", "OWNER_CHAT_ID": "777",
                                "PORTALS_API_KEY": "test", "PUBLIC_USERS": "1",
                                "STARS_PAYMENTS": "1", "GITHUB_ACTIONS": "true"})
+
+    def test_terms_are_shown_before_requesting_invoice(self):
+        self.update(message("/subscription PRO", chat=self.uid))
+        keyboard = self.telegram.sent[-1][2]
+        self.assertEqual(keyboard[0][0]["url"], self.cfg.stars_terms)
+        self.assertIn("Принимаю условия", keyboard[1][0]["text"])
+        self.telegram.call.assert_not_called()
+        self.update(message("/terms", chat=self.uid))
+        self.assertEqual(self.telegram.sent[-1][2][0][0]["url"], self.cfg.stars_terms)
