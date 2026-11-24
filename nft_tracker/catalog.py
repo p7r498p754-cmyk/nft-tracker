@@ -42,15 +42,18 @@ def update_catalog(store, data, now):
     store.set("price_catalog", json.dumps({"at": now.isoformat(), "rows": rows}, ensure_ascii=False))
 
 
+def refresh_catalog_if_due(store, now):
+    snapshot = store.get_json("price_catalog")
+    if not snapshot or now >= parse_date(snapshot["at"]) + PERIOD:
+        update_catalog(store, fetch_catalog(), now)
+
+
 def catalog_page(store, now, page=1, query=""):
     data = store.get_json("price_catalog")
     back = [{"text": "Меню", "callback_data": "menu:main"}]
     if not data:
-        try:
-            update_catalog(store, fetch_catalog(), now)
-        except (OSError, ValueError):
-            return "Не удалось загрузить цены StarPrice. Попробуйте /prices позже.", [back]
-        data = store.get_json("price_catalog")
+        return ("Снимок цен пока недоступен. Откройте каталог позже командой /prices.",
+                [[{"text": "Все цены", "callback_data": "prices:1"}], back])
     at = parse_date(data["at"])
     rows = [r for r in data["rows"] if query.casefold() in r["name"].casefold()]
     pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
