@@ -46,7 +46,15 @@ export async function tick(db, now, load=fetch) {
 export default {
   async scheduled(event,env) { await tick(env.DB,Math.floor(event.scheduledTime/1000)); },
   async fetch(request,env) {
-    if (request.method!=="GET" || new URL(request.url).pathname!=="/health") return new Response(null,{status:404});
+    const path = new URL(request.url).pathname;
+    if (request.method === "GET" && path === "/preview") {
+      const record = await env.DB.prepare("SELECT at,snapshot FROM catalog ORDER BY at DESC LIMIT 1").first();
+      if (!record) return Response.json({error:"catalog_pending"}, {status:503});
+      const rows = JSON.parse(record.snapshot).sort((a,b) => a.name.toLowerCase() < b.name.toLowerCase() ? -1 : Number(a.name.toLowerCase() > b.name.toLowerCase()))
+        .slice(0,5).map(({name, prices}) => ({name,prices:Object.fromEntries(Object.entries(prices).map(([market,offer])=>[market,offer.value]))}));
+      return Response.json({at:new Date(record.at*1000).toISOString(), rows}, {headers:{"Cache-Control":"public, max-age=60"}});
+    }
+    if (request.method!=="GET" || path!=="/health") return new Response(null,{status:404});
     const state=await env.DB.prepare("SELECT last_success,gap_seconds,last_error,(SELECT max(at) FROM catalog) AS catalog_at FROM monitor WHERE id=1").first();
     const now=Date.now()/1000;
     const ok=!!state?.last_success && !state.last_error && now-state.last_success<900 && now-state.catalog_at<432900;

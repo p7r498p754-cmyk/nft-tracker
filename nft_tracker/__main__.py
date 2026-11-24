@@ -10,7 +10,7 @@ from threading import Event
 from . import __version__
 from .bot import process_updates, register_commands
 from .config import ConfigError, Settings
-from .catalog import fetch_catalog, refresh_catalog_if_due
+from .catalog import cache_preview, fetch_catalog, refresh_catalog_if_due
 from .floors import refresh
 from .monitor import run_cycle, utcnow
 from .portals import PortalsClient, PortalsError
@@ -114,6 +114,11 @@ def market_worker(cfg, portals, stop, once):
                     LOG.info("Свежих цен коллекций по площадкам: %s", count)
                 except (OSError, ValueError, TelegramError) as error:
                     LOG.warning("Обновление цен коллекций: %s", error)
+                    if not store.get("price_catalog"):
+                        try:
+                            cache_preview(store, utcnow())
+                        except (OSError, ValueError):
+                            LOG.warning("Резервный предпросмотр недоступен")
                     ok = False
                 next_floors = started + cfg.scan_seconds
             if once:

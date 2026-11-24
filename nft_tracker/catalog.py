@@ -57,14 +57,43 @@ def update_catalog(store, data, now):
         store.set("price_catalog", snapshot)
 
 
+def cache_preview(store, now):
+    previous = store.get_json("catalog_preview")
+    if previous and now < parse_date(previous["at"]) + PERIOD:
+        return
+    url = "https://nft-tracker-market-beta.nffv2bg9mw.workers.dev/preview"
+    request = urllib.request.Request(url, headers={"User-Agent": "NFT-Tracker/0.7.0", "Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        preview = json.load(response)
+    if not isinstance(preview, dict) or not parse_date(preview.get("at")):
+        raise ValueError("Некорректная дата предпросмотра")
+    rows = preview.get("rows")
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 5:
+        raise ValueError("Некорректный размер предпросмотра")
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("name"), str) or not isinstance(row.get("prices"), dict):
+            raise ValueError("Некорректная строка предпросмотра")
+        if any(k not in CURRENCIES or not isinstance(v,str) or dec(v) is None for k,v in row["prices"].items()):
+            raise ValueError("Некорректная цена предпросмотра")
+    store.set("catalog_preview", json.dumps(preview))
+
+
 def refresh_catalog_if_due(store, now):
     snapshot = store.get_json("price_catalog")
     if not snapshot or now >= parse_date(snapshot["at"]) + PERIOD:
-        update_catalog(store, fetch_catalog(), now)
+        try:
+            update_catalog(store, fetch_catalog(), now)
+        except (OSError, ValueError):
+            cache_preview(store, now)
+            raise
 
 
 def catalog_page(store, now, page=1, query="", *, full=False, market=""):
     data = store.get_json("price_catalog")
+    if not full:
+        preview = store.get_json("catalog_preview")
+        if preview and (not data or parse_date(preview["at"]) > parse_date(data["at"])):
+            data = preview
     back = [{"text": "Меню", "callback_data": "menu:main"}]
     if not data:
         return ("Снимок цен пока недоступен. Откройте каталог позже командой /prices.",
