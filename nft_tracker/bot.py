@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import html
+from concurrent.futures import ThreadPoolExecutor
 from time import monotonic
 from datetime import datetime, timedelta
 from typing import Any
 
 from . import __version__
-from .service import prefs, threshold, view, SUB
-from .subscriptions import entitlement, PLANS
+from .service import effective_access, prefs, threshold, view, SUB
+from .subscriptions import PLANS
 from .config import Settings
 from .floors import floor_status
 from .storage import Storage
@@ -54,7 +55,7 @@ def status_text(cfg: Settings, store: Storage, now: datetime, key=OWNER) -> str:
     error = meta.get("error")
     link = ("шаблон задан владельцем (требует проверки)" if cfg.listing_url_template
             else "не настроена в конфигурации; может поступить из API")
-    current_plan = entitlement(store.db, cfg.owner_chat_id if key == OWNER else int(key), int(now.timestamp()))[0]
+    current_plan = effective_access(cfg, store, cfg.owner_chat_id if key == OWNER else int(key), int(now.timestamp()))[0]
     active_discount = threshold(store, user, PLANS[current_plan])
     favorites = prefs(store,key).get("favorites", [])
     lines = [
@@ -99,7 +100,7 @@ def status_text(cfg: Settings, store: Storage, now: datetime, key=OWNER) -> str:
 
 def settings_view(cfg: Settings, store: Storage, now, key=OWNER) -> tuple[str, list]:
     user = store.user(key)
-    tier = entitlement(store.db, cfg.owner_chat_id if key == OWNER else int(key), int(now.timestamp()))[0]
+    tier = effective_access(cfg, store, cfg.owner_chat_id if key == OWNER else int(key), int(now.timestamp()))[0]
     cur = threshold(store, user, PLANS[tier])
     text = (f"<b>Настройки</b>\nМинимальная скидка: <b>{cur}%</b>\nИзбранное: /favorite\nОбъявления: Portals\n\n"
             "Выберите порог скидки:")
@@ -153,13 +154,19 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         edit_id = (cb.get("message") or {}).get("message_id")
         data = str(cb.get("data") or "")
         sender = (cb.get("from") or {}).get("id")
-        try:
-            tg.answer_callback(str(cb.get("id", "")))
-        except TelegramError:
-            pass
+        def acknowledge():
+            try:
+                tg.answer_callback(str(cb.get("id", "")))
+            except TelegramError:
+                pass
+
         if not isinstance(chat, int) or chat <= 0 or sender != chat or (chat != cfg.owner_chat_id and not cfg.public_users):
+            acknowledge()
             return
-        _on_callback(cfg, store, tg, chat, edit_id, data, now)
+        # Clear the spinner while rendering the menu on the SQLite thread.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(acknowledge)
+            _on_callback(cfg, store, tg, chat, edit_id, data, now)
         return
     if not msg:
         return
@@ -232,7 +239,7 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
         return
     if data.startswith("set:discount:"):
         value = data.rsplit(":", 1)[1]
-        if value in ("40", "50") and entitlement(store.db, chat, int(now.timestamp()))[0] == "FREE":
+        if value in ("40", "50") and effective_access(cfg, store, chat, int(now.timestamp()))[0] == "FREE":
             _reply(tg, chat, "Пороги 40% и 50% доступны с PLUS. На FREE действует 30%.", SUB, edit_id)
             return
         if value in ("30", "40", "50") and value in store.get("discount_choices","30,40,50").split(","):

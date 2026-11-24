@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from .bot import OWNER
-from .subscriptions import PLANS, entitlement, reserve_alert
-from .service import prefs, fits, limits, threshold
+from .subscriptions import PLANS, reserve_alert
+from .service import effective_access, prefs, fits, limits, threshold
 from .config import Settings
 from .portals import PortalsClient, PortalsError
 from .storage import Storage, User, iso
@@ -135,7 +135,7 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
     retry_needed = False
     sales = store.sales()
     users = store.active_users()
-    plans = {u.user_key: entitlement(store.db, u.chat_id or cfg.owner_chat_id, int(now.timestamp()))[0] for u in users}
+    plans = {u.user_key: effective_access(cfg, store, u.chat_id or cfg.owner_chat_id, int(now.timestamp()))[0] for u in users}
     discounts = {u.user_key: threshold(store, u, PLANS[plans[u.user_key]]) for u in users}
     settings = {u.user_key: prefs(store, u.user_key) for u in users}
     rep.recipients = len(users)
@@ -206,7 +206,7 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         if store.user(user.user_key) != user:
             continue
         chat = user.chat_id if user.chat_id is not None else cfg.owner_chat_id
-        tier = entitlement(store.db, chat, int(now.timestamp()))[0]
+        tier = effective_access(cfg, store, chat, int(now.timestamp()))[0]
         if tier != plans[user.user_key] or not fits(ev, prefs(store,user.user_key), PLANS[tier]):
             continue
         if not reserve_alert(store.db, user.user_key, sid, now.date().isoformat(), limits(store,tier)[0]):

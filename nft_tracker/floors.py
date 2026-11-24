@@ -6,8 +6,8 @@ from decimal import Decimal
 
 from .catalog import fetch_catalog, update_catalog
 from .config import Settings
-from .service import prefs, limits, threshold
-from .subscriptions import PLANS, entitlement, reserve_alert
+from .service import effective_access, prefs, limits, threshold
+from .subscriptions import PLANS, reserve_alert
 from .portals import dec, parse_date
 from .storage import Storage
 from .telegram import TelegramClient
@@ -57,7 +57,7 @@ def refresh(store, tg, cfg, data, now):
         previous[key] = row
     for user in store.active_users():
         uid = user.chat_id or cfg.owner_chat_id
-        name = entitlement(store.db, uid, int(now.timestamp()))[0]
+        name = effective_access(cfg, store, uid, int(now.timestamp()))[0]
         plan = PLANS[name]
         settings = prefs(store, user.user_key)
         selected = settings.get("favorites", [])[:plan.favorites]

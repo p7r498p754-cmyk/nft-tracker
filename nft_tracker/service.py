@@ -23,6 +23,16 @@ DETAILS = {
 }
 
 
+def effective_access(cfg, store, uid, now):
+    if uid == cfg.owner_chat_id and uid > 0:
+        trial = store.get_json("owner_plan_preview")
+        name, end = trial.get("plan"), trial.get("end")
+        if name in PLANS and type(end) is int and end > now:
+            return name, end, True
+    name, end = entitlement(store.db, uid, now)
+    return name, end, False
+
+
 def prefs(store, key):
     row = store.db.execute("SELECT settings FROM preferences WHERE user_key=?", (key,)).fetchone()
     return json.loads(row[0]) if row else {}
@@ -54,10 +64,12 @@ def fits(event, settings, plan):
     return not (plan.level >= 3 and event.name.casefold() in settings.get("exclude", []))
 
 
-def menu(store, name, end):
+def menu(store, name, end, preview=False):
     until = datetime.fromtimestamp(end, timezone.utc).strftime("%d.%m.%Y %H:%M UTC") if end else "бессрочно"
     lines = ["⭐ <b>Подписка NFT Tracker</b>", f"Ваш тариф: <b>{name}</b> · {until}",
              "Автопродление выключено. Платные планы открыты для ознакомления.", ""]
+    if preview:
+        lines.insert(2, "Тестовый доступ владельца · без оплаты.")
     buttons = []
     for tier, plan in PLANS.items():
         cost = f"{plan.price} ⭐ / 30 дней" if plan.price else "бесплатно"
@@ -91,13 +103,23 @@ def admin(cfg, store, tg, uid, action, now):
     if uid != cfg.owner_chat_id or not uid:
         return "Раздел доступен владельцу.", None
     keyboard = [[{"text": label, "callback_data": "admin:" + cmd}] for cmd,label in (
-        ("users","Пользователи"), ("income","Доход NFT Tracker"), ("monitor","Мониторинг"), ("config","Настройки"))]
+        ("users","Пользователи"), ("income","Доход NFT Tracker"), ("monitor","Мониторинг"), ("config","Настройки"), ("preview","Проверить тариф"))]
     action = action.strip() or "menu"
     label = action.split()[0]
-    if label not in ("menu","users","income","monitor","config","limit","reports"):
+    if label not in ("menu","users","income","monitor","config","limit","reports","threshold","preview"):
         label = "unknown"
     with store.db:
         store.db.execute("INSERT INTO audit(at,action) VALUES (?,?)", (int(now.timestamp()), "admin:"+label))
+    if action == "preview":
+        tier_buttons = [{"text": name, "callback_data": "admin:preview " + name} for name in PLANS]
+        return ("Выберите тариф для бесплатной проверки на аккаунте владельца. Доступ действует 24 часа. "
+                "FREE завершает проверку.", [tier_buttons[:2], tier_buttons[2:]] + keyboard)
+    if action.startswith("preview "):
+        name = action.removeprefix("preview ").strip().upper()
+        if name in PLANS:
+            trial = {} if name == "FREE" else {"plan": name, "end": int(now.timestamp()) + 86400}
+            store.set("owner_plan_preview", json.dumps(trial))
+            return menu(store, *effective_access(cfg, store, uid, int(now.timestamp())))
     if action == "users":
         names = Counter(entitlement(store.db, u or uid, int(now.timestamp()))[0] for u, in store.db.execute("SELECT chat_id FROM users"))
         return f"Пользователей: {sum(names.values())} · с активным платным доступом: {sum(names.values())-names['FREE']}\n" + " · ".join(f"{n}: {names[n]}" for n in PLANS), keyboard
@@ -172,7 +194,7 @@ def star_amount(row):
 
 
 def view(cfg, store, tg, uid, key, command, args, now):
-    name, end = entitlement(store.db, uid, int(now.timestamp()))
+    name, end, preview = effective_access(cfg, store, uid, int(now.timestamp()))
     plan = PLANS[name]
     required = {"/filter":1, "/summary":1, "/analytics":2, "/export":3, "/report":3}
     if command in required and plan.level < required[command]:
@@ -184,7 +206,7 @@ def view(cfg, store, tg, uid, key, command, args, now):
         if args in PLANS:
             return (f"<b>{args}</b> · {PLANS[args].price} ⭐\n{DETAILS[args]}\n"
                     "Списание и продление отключены. Смена платного тарифа предусмотрена после окончания оплаченного периода."), SUB
-        return menu(store, name, end)
+        return menu(store, name, end, preview)
     if command == "/prices":
         fields = args.split()
         page = int(fields.pop(0)) if fields and fields[0].isascii() and fields[0].isdecimal() else 1

@@ -170,3 +170,14 @@ class SubscriptionTests(TestCase):
         handle_update(self.cfg,self.store,self.tg,callback("set:discount:50",chat=17),NOW)
         self.assertEqual(self.store.user("17").min_discount,30)
         self.assertIn("PLUS",self.tg.edits[-1][2])
+
+    def test_owner_can_preview_paid_access_without_payment_data(self):
+        self.send("/start", OWNER)
+        self.assertIn("владельцу", self.send("/admin preview ULTRA"))
+        self.assertIn("Тестовый доступ", self.send("/admin preview ULTRA", OWNER))
+        self.assertIn("ULTRA", self.send("/subscription", OWNER))
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM star_terms").fetchone()[0], 0)
+        handle_update(self.cfg, self.store, self.tg, message("/subscription", chat=OWNER), NOW+timedelta(days=1))
+        self.assertIn("Ваш тариф: <b>FREE</b>", self.tg.sent[-1][1])
+        self.send("/admin preview PRO", OWNER)
+        self.assertIn("Ваш тариф: <b>FREE</b>", self.send("/admin preview FREE", OWNER))
