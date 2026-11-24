@@ -9,6 +9,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
+from .beta import MINUTES
 from .catalog import CURRENCIES, catalog_page
 from .storage import Storage
 from .subscriptions import PLANS, entitlement
@@ -31,6 +32,11 @@ def effective_access(cfg, store, uid, now):
             return name, end, True
         if cfg.owner_lifetime_ultra:
             return "ULTRA", None, False
+    if cfg.closed_beta and uid != cfg.owner_chat_id:
+        row = store.db.execute("SELECT plan,ends FROM beta_invites WHERE uid=?", (uid,)).fetchone()
+        if row and row[1] > now:
+            return row[0], row[1], False
+        return "FREE", None, False
     name, end = entitlement(store.db, uid, now)
     return name, end, False
 
@@ -79,7 +85,7 @@ def menu(store, name, end, preview=False, *, sales_enabled=False):
     for tier, plan in PLANS.items():
         cost = f"{plan.price} ⭐ / 30 дней" if plan.price else "бесплатно"
         alerts, favorites = limits(store, tier)
-        lines.extend([f"<b>{tier}</b> · {cost}", f"{alerts} сигналов в сутки · {favorites} избранных. {DETAILS[tier]}"])
+        lines.extend([f"<b>{tier}</b> · {cost}", f"{alerts} сигналов в сутки · {favorites} избранных. {DETAILS[tier]} Цель обновления: {MINUTES[tier]} мин, при наличии свежих данных."])
         buttons.append({"text": tier, "callback_data": "sub:" + tier})
     return "\n".join(lines), [buttons[:2], buttons[2:], [{"text": "Меню", "callback_data": "menu:main"}]]
 

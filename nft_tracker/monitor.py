@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from . import beta
 from .bot import OWNER
 from .subscriptions import PLANS, reserve_alert
 from .service import effective_access, prefs, fits, limits, threshold
@@ -136,6 +137,10 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
     sales = store.sales()
     users = store.active_users()
     plans = {u.user_key: effective_access(cfg, store, u.chat_id or cfg.owner_chat_id, int(now.timestamp()))[0] for u in users}
+    if cfg.closed_beta:
+        listings = beta.feed(store, [e for e in listings if e.event_time <= now], oldest_eligible)
+        users = [u for u in users if beta.allowed(cfg, store, u.chat_id or cfg.owner_chat_id)
+                 and beta.due(store, u, plans[u.user_key], int(now.timestamp()))]
     discounts = {u.user_key: threshold(store, u, PLANS[plans[u.user_key]]) for u in users}
     settings = {u.user_key: prefs(store, u.user_key) for u in users}
     rep.recipients = len(users)
@@ -227,6 +232,10 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         store.mark_sent(user.user_key, sid, now)
         rep.alerts += 1
 
+    if cfg.closed_beta and complete and not retry_needed:
+        with store.db:
+            store.db.executemany("INSERT OR REPLACE INTO beta_ticks VALUES (?,?)",
+                                 [(u.user_key, int(now.timestamp())) for u in users if store.user(u.user_key)])
     if complete and not retry_needed and checkpoint is not None and checkpoint >= since:
         store.set("last_listing_at", iso(checkpoint))
 

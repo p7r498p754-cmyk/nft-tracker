@@ -4,7 +4,7 @@ from html import escape
 from .config import Settings
 from .links import safe_link
 from .portals import PortalsClient, parse_event, dec
-from .telegram import TelegramClient, alert_keyboard
+from .telegram import TelegramClient, TelegramError, alert_keyboard
 
 
 def main():
@@ -40,7 +40,15 @@ def main():
                    f"\nЦена: {fresh.price} {escape(cfg.price_unit)}")
         if not link:
             caption += "\nПрямая ссылка на этот лот не подтверждена."
-        msg = tg.send_photo(cfg.owner_chat_id, fresh.photo_url, caption, alert_keyboard(link))
+        try:
+            msg = tg.send_photo(cfg.owner_chat_id, fresh.photo_url, caption, alert_keyboard(link))
+        except TelegramError as error:
+            if error.code != 400:
+                raise
+            msg = tg.send(cfg.owner_chat_id, caption + "\nФото не удалось загрузить.", alert_keyboard(link))
+            if msg.get("message_id") and msg.get("chat", {}).get("id") == cfg.owner_chat_id:
+                print("Telegram accepted owner card without photo; listing_url=" + str(bool(link)))
+                return
         if not (msg.get("message_id") and msg.get("photo") and msg.get("chat",{}).get("id")==cfg.owner_chat_id):
             raise RuntimeError("Delivery not confirmed")
         print("Telegram accepted matched owner card; listing_url=" + str(bool(link)))

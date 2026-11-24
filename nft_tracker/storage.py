@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
+from .beta import SCHEMA as BETA_SCHEMA
 from .payments import SCHEMA as PAYMENTS_SCHEMA
 from .subscriptions import SCHEMA as SUBSCRIPTION_SCHEMA
 from .valuation import HISTORY_DAYS, MarketEvent
@@ -55,7 +56,7 @@ class Storage:
         # also releases test/exception-path connections safely.
         self._finalizer = weakref.finalize(self, self.db.close)
         self.db.execute("PRAGMA foreign_keys = ON")
-        self.db.executescript(SCHEMA + SUBSCRIPTION_SCHEMA + PAYMENTS_SCHEMA)
+        self.db.executescript(SCHEMA + SUBSCRIPTION_SCHEMA + PAYMENTS_SCHEMA + BETA_SCHEMA)
         # Backfill deduplication and day budgets for databases created by 0.5.x.
         if not self.get("subscription_migration_v1"):
             with self.db:

@@ -8,7 +8,7 @@ from time import monotonic
 from datetime import datetime, timedelta
 from typing import Any
 
-from . import __version__
+from . import __version__, beta
 from .service import effective_access, prefs, threshold, view, SUB
 from .subscriptions import PLANS
 from .payments import answer_checkout, create_invoice, settle_receipt
@@ -203,7 +203,10 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
             except TelegramError:
                 pass
 
-        if not isinstance(chat, int) or chat <= 0 or sender != chat or (chat != cfg.owner_chat_id and not cfg.public_users):
+        if not isinstance(chat, int) or chat <= 0 or sender != chat or not beta.allowed(cfg, store, chat):
+            acknowledge()
+            return
+        if cfg.closed_beta and chat != cfg.owner_chat_id and not beta.admit_request(store, chat, int(now.timestamp())):
             acknowledge()
             return
         # Clear the spinner while rendering the menu on the SQLite thread.
@@ -234,14 +237,32 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
     command = str(msg.get("text") or "").split(" ")[0].split("@")[0].lower()
     if command == "/admin" and (msg.get("from") or {}).get("id") != chat:
         return
+    if cfg.closed_beta:
+        if not beta.allowed(cfg, store, chat):
+            return
+        if chat != cfg.owner_chat_id and not beta.admit_request(store, chat, int(now.timestamp())):
+            return
+        args = str(msg.get("text") or "").split()
+        if chat == cfg.owner_chat_id and command == "/invite":
+            ok = (len(args) == 3 and args[1].isascii() and args[1].isdigit() and len(args[1]) <= 16
+                  and beta.invite(store, int(args[1]), args[2].upper(), int(now.timestamp()) + 30*86400))
+            tg.send(chat, "Доступ на 30 дней сохранён." if ok else "Формат: /invite ID FREE|PLUS|PRO|ULTRA. До 20 участников.")
+            return
+        if command == "/feedback" and chat != cfg.owner_chat_id:
+            note = " ".join(args[1:])[:1000]
+            if note:
+                with store.db:
+                    store.db.execute("INSERT OR REPLACE INTO beta_feedback VALUES (?,?)", (chat, note))
+            tg.send(chat, "Отзыв сохранён." if note else "Отправьте /feedback и текст отзыва.")
+            return
     if command not in COMMANDS:
-        if (chat == cfg.owner_chat_id or cfg.public_users) and msg.get("text"):
+        if beta.allowed(cfg, store, chat) and msg.get("text"):
             tg.send(chat, "Выберите действие в меню или отправьте /help.", MENU)
         return
     if command == "/id":
         tg.send(chat, f"Ваш Telegram ID: <code>{chat}</code>\nИспользуйте его только как секрет OWNER_CHAT_ID в настройках хостинга.")
         return
-    if chat != cfg.owner_chat_id and not cfg.public_users:
+    if not beta.allowed(cfg, store, chat):
         tg.send(chat, "🔒 NFT Tracker сейчас работает в закрытом режиме.")
         return
     key = OWNER if chat == cfg.owner_chat_id else str(chat)
@@ -302,6 +323,10 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
             _reply(tg, chat, text, kb, edit_id)
         return
     if data == "del:yes":
+        if cfg.closed_beta:
+            with store.db:
+                store.db.execute("DELETE FROM beta_invites WHERE uid=?", (chat,))
+                store.db.execute("DELETE FROM alert_slots WHERE user_key=?", (key,))
         store.delete_user(key)
         _reply(tg, chat, "✅ Ваши настройки и история уведомлений удалены. /start — начать заново.", None, edit_id)
         return
