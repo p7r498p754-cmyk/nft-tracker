@@ -1,0 +1,32 @@
+name: telegram-commands
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'nft_tracker/bot.py'
+      - 'nft_tracker/__main__.py'
+      - '.github/workflows/telegram-commands.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nft-tracker-telegram-commands
+  cancel-in-progress: false
+
+jobs:
+  register:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Register and verify Telegram command hints
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+        run: python -m nft_tracker register-commands

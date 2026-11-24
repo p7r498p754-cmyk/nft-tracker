@@ -27,6 +27,12 @@ CREATE TABLE IF NOT EXISTS star_terms (
 CREATE INDEX IF NOT EXISTS order_owner ON star_orders(uid);
 CREATE TABLE IF NOT EXISTS star_refunds (
     charge TEXT PRIMARY KEY, payload TEXT NOT NULL REFERENCES star_orders(payload));
+CREATE TABLE IF NOT EXISTS test_gift_offers (
+    payload TEXT PRIMARY KEY REFERENCES star_orders(payload), gift_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS test_gift_claims (
+    payload TEXT PRIMARY KEY REFERENCES test_gift_offers(payload),
+    charge TEXT NOT NULL UNIQUE REFERENCES star_terms(charge),
+    approved_at INTEGER);
 CREATE TABLE IF NOT EXISTS price_history (
     at TEXT PRIMARY KEY, snapshot TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS preferences (
@@ -49,12 +55,16 @@ def entitlement(db, uid, now):
     return row or ("FREE", None)
 
 
-def test_order(db, uid, plan):
+def test_order(db, uid, plan, *, gift_id=None):
     if type(uid) is not int or uid <= 0 or plan not in PLANS or not PLANS[plan].price:
         raise ValueError("Invalid sandbox order")
+    if gift_id is not None and (not isinstance(gift_id, str) or not gift_id.startswith("test-") or len(gift_id) <= 5):
+        raise ValueError("Invalid sandbox gift")
     token = "test-" + secrets.token_urlsafe(24)
     with db:
         db.execute("INSERT INTO star_orders VALUES (?,?,?,?)", (token, uid, plan, PLANS[plan].price))
+        if gift_id is not None:
+            db.execute("INSERT INTO test_gift_offers VALUES (?,?)", (token, gift_id))
     return token
 
 
@@ -112,6 +122,22 @@ def settle_test_event(db, uid, event, *, refund=False):
         if collision and not reversal:
             raise ValueError("Overlapping subscription")
         db.execute("INSERT INTO star_terms VALUES (?,?,?,?)", (charge, token, start, end))
+
+        if event.get("is_recurring") is True and event.get("is_first_recurring") is True and not reversal:
+            db.execute("""INSERT OR IGNORE INTO test_gift_claims(payload, charge)
+                        SELECT payload, ? FROM test_gift_offers WHERE payload=?""", (charge, token))
+
+
+def approve_test_gift(db, payload, *, actor, owner, now):
+    """Simulate the owner's confirmation within the offline payment ledger."""
+    if type(owner) is not int or owner <= 0 or type(actor) is not int or actor != owner:
+        raise PermissionError("Owner confirmation required")
+    with db:
+        db.execute("BEGIN IMMEDIATE")
+        return bool(db.execute("""UPDATE test_gift_claims SET approved_at=?
+            WHERE payload=? AND approved_at IS NULL AND NOT EXISTS (
+                SELECT 1 FROM star_refunds WHERE charge=test_gift_claims.charge
+            )""", (now, payload)).rowcount)
 
 
 def reserve_alert(db, user, signal, day, limit):

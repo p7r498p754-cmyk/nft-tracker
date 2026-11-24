@@ -1,4 +1,4 @@
-"""CLI: python -m nft_tracker {run|loop|diagnose|commands|serve-once}"""
+"""CLI: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}"""
 from __future__ import annotations
 
 import logging
@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 
 from . import __version__
-from .bot import process_updates
+from .bot import process_updates, register_commands
 from .config import ConfigError, Settings
 from .catalog import fetch_catalog, refresh_catalog_if_due
 from .floors import refresh
@@ -154,11 +154,11 @@ def run_loop(cfg, store, tg, portals, *, once=False):
 
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "run"
-    if cmd not in {"run", "loop", "diagnose", "commands", "serve-once"}:
-        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|serve-once}")
+    if cmd not in {"run", "loop", "diagnose", "commands", "register-commands", "serve-once"}:
+        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}")
         return 2
     try:
-        cfg = Settings.from_env(need_portals=cmd != "commands")
+        cfg = Settings.from_env(need_portals=cmd not in {"commands", "register-commands"})
     except ConfigError as e:
         print(f"Ошибка настройки: {e}")
         return 2
@@ -170,6 +170,18 @@ def main(argv: list[str]) -> int:
     if cmd == "diagnose":
         from .diagnose import run_diagnose
         return run_diagnose(cfg)
+    if cmd == "register-commands":
+        try:
+            tg = TelegramClient(cfg.telegram_token)
+            result = tg.call("getMe", timeout=5)
+            if not isinstance(result, dict) or result.get("username", "").lower() != "nfttrecker_bot":
+                raise TelegramError("Токен принадлежит другому боту")
+            register_commands(cfg, tg)
+        except TelegramError as error:
+            LOG.error("Подсказки команд Telegram: %s", error)
+            return 1
+        LOG.info("Telegram подтвердил подсказки команд в личном чате")
+        return 0
     if cmd == "commands":
         store = Storage(cfg.db_path)
         try:

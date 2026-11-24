@@ -57,3 +57,20 @@ class ResponseTests(unittest.TestCase):
         with patch("nft_tracker.bot.monotonic", side_effect=[10,15]):
             process_updates(make_settings(), store, tg, NOW, timeout=20)
         self.assertIn("1 с", tg.sent[0][1])
+
+    def test_command_hints_cover_handlers_and_admin_scope(self):
+        from nft_tracker.bot import COMMANDS, register_commands
+        from tests.helpers import OWNER
+        tg = Mock()
+        installed = {}
+        def api(method, payload, timeout):
+            scope = payload["scope"]["type"]
+            if method == "setMyCommands":
+                installed[scope] = payload["commands"]
+                return True
+            return installed[scope]
+        tg.call.side_effect = api
+        register_commands(make_settings(), tg)
+        self.assertEqual({"/" + row["command"] for row in installed["chat"]}, COMMANDS)
+        self.assertEqual({"/" + row["command"] for row in installed["all_private_chats"]}, COMMANDS - {"/admin"})
+        self.assertEqual(tg.call.call_args_list[-1].args[1]["scope"]["chat_id"], OWNER)
