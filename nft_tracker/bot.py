@@ -157,6 +157,8 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         return
     command = str(msg.get("text") or "").split(" ")[0].split("@")[0].lower()
     if command not in COMMANDS:
+        if chat == cfg.owner_chat_id and msg.get("text"):
+            tg.send(chat, "Выберите действие в меню или отправьте /help.", MENU)
         return
     if command == "/id":
         tg.send(chat, f"Ваш Telegram ID: <code>{chat}</code>\nИспользуйте его только как секрет OWNER_CHAT_ID в настройках хостинга.")
