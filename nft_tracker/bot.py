@@ -17,10 +17,45 @@ from .telegram import TelegramClient, TelegramError
 
 OWNER = "owner"
 DISCOUNT_CHOICES = (30, 40, 50)
-COMMANDS = {"/ping", "/start", "/status", "/settings", "/stop", "/help", "/id", "/delete", "/markets", "/prices"}
-
+COMMAND_HINTS = {
+    "start": "Включить уведомления и открыть меню",
+    "subscription": "Посмотреть тариф и условия подписок",
+    "prices": "Открыть каталог цен",
+    "gift": "Посмотреть карточку коллекции",
+    "markets": "Посмотреть цены Telegram и Fragment",
+    "status": "Проверить мониторинг",
+    "settings": "Настроить порог скидки",
+    "favorite": "Управлять избранными коллекциями",
+    "filter": "Настроить фильтры",
+    "summary": "Посмотреть сводку сигналов",
+    "analytics": "Открыть аналитику коллекции",
+    "report": "Посмотреть отчёт по источникам",
+    "export": "Выгрузить данные в CSV",
+    "ping": "Проверить время ожидания команды",
+    "stop": "Выключить уведомления",
+    "help": "Открыть справку",
+    "paysupport": "Получить помощь по платежам",
+    "id": "Узнать свой Telegram ID",
+    "delete": "Удалить данные с подтверждением",
+    "admin": "Открыть панель владельца",
+}
+COMMANDS = {"/" + name for name in COMMAND_HINTS}
 SERVICE = {"/gift", "/subscription", "/admin", "/favorite", "/filter", "/summary", "/analytics", "/report", "/export", "/paysupport"}
-COMMANDS |= SERVICE
+
+
+def register_commands(cfg: Settings, tg: TelegramClient) -> None:
+    general = [{"command": name, "description": description}
+               for name, description in COMMAND_HINTS.items() if name != "admin"]
+    scopes = [({"type": "all_private_chats"}, general)]
+    if not cfg.setup_mode:
+        admin = {"command": "admin", "description": COMMAND_HINTS["admin"]}
+        scopes.append(({"type": "chat", "chat_id": cfg.owner_chat_id}, [*general, admin]))
+    for scope, commands in scopes:
+        if tg.call("setMyCommands", {"scope": scope, "commands": commands}, timeout=5) is not True:
+            raise TelegramError("Telegram не подтвердил сохранение команд")
+        if tg.call("getMyCommands", {"scope": scope}, timeout=5) != commands:
+            raise TelegramError("Telegram вернул другой список команд")
+
 
 MENU = [
     *SUB,

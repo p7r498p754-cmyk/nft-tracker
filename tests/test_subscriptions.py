@@ -193,3 +193,33 @@ class SubscriptionTests(TestCase):
         handle_update(self.cfg, self.store, self.tg, message("/subscription", chat=OWNER), NOW+timedelta(days=3650))
         self.assertIn("ULTRA</b> · бессрочно", self.tg.sent[-1][1])
         self.assertEqual(self.store.db.execute("SELECT count(*) FROM star_terms").fetchone()[0], 0)
+
+    def test_gift_requires_first_confirmed_payment_and_owner_approval(self):
+        from nft_tracker.subscriptions import approve_test_gift
+        payload = make_order(self.store.db, 17, "PLUS", gift_id="test-gift")
+        event = {"invoice_payload": payload, "currency": "XTR", "total_amount": 99,
+                 "telegram_payment_charge_id": "first", "subscription_expiration_date": self.t + MONTH,
+                 "is_recurring": True, "is_first_recurring": True}
+        approved = lambda actor: approve_test_gift(self.store.db, payload, actor=actor, owner=OWNER, now=self.t)
+        self.assertFalse(approved(OWNER))
+        with self.assertRaises(ValueError):
+            settle_test_event(self.store.db, 18, event)
+        settle_test_event(self.store.db, 17, event)
+        settle_test_event(self.store.db, 17, event)
+        with self.assertRaises(PermissionError):
+            approved(17)
+        self.assertTrue(approved(OWNER))
+        self.assertFalse(approved(OWNER))
+        settle_test_event(self.store.db, 17, dict(event, telegram_payment_charge_id="renewal",
+                          subscription_expiration_date=self.t + MONTH * 2, is_first_recurring=False))
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM test_gift_claims").fetchone()[0], 1)
+
+    def test_refund_blocks_pending_test_gift(self):
+        from nft_tracker.subscriptions import approve_test_gift
+        payload = make_order(self.store.db, 17, "PRO", gift_id="test-gift")
+        event = {"invoice_payload": payload, "currency": "XTR", "total_amount": 199,
+                 "telegram_payment_charge_id": "refunded", "subscription_expiration_date": self.t + MONTH,
+                 "is_recurring": True, "is_first_recurring": True}
+        settle_test_event(self.store.db, 17, event)
+        settle_test_event(self.store.db, 17, event, refund=True)
+        self.assertFalse(approve_test_gift(self.store.db, payload, actor=OWNER, owner=OWNER, now=self.t))
