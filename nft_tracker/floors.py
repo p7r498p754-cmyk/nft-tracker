@@ -10,7 +10,7 @@ from .service import effective_access, prefs, limits, threshold
 from .subscriptions import PLANS, reserve_alert
 from .portals import dec, parse_date
 from .storage import Storage
-from .telegram import TelegramClient
+from .telegram import TelegramClient, TelegramError
 
 MARKETS = {"telegram": "STARS", "fragment": "GRAM"}
 MAX_AGE = timedelta(hours=3)
@@ -30,8 +30,6 @@ def observations(data, now):
         for offer in gift["offers"]:
             if not isinstance(offer, dict):
                 continue
-            if not isinstance(offer,dict):
-                raise ValueError("Некорректное предложение")
             market = offer.get("market")
             if market not in MARKETS or offer.get("currency") != MARKETS[market]:
                 continue
@@ -84,7 +82,13 @@ def refresh(store, tg, cfg, data, now):
                 lines = ["Снижение ориентира коллекции · StarPrice"]
                 for _, row, before in changes[:15]:
                     lines.append(f"{row['market']} · {html.escape(row['name'])}: {before} → {row['price']} {MARKETS[row['market']]}")
-                tg.send(uid, "\n".join(lines))
+                try:
+                    tg.send(uid, "\n".join(lines))
+                except TelegramError as error:
+                    if not error.blocked:
+                        raise
+                    store.set_active(user.user_key, False)
+                    continue
                 store.mark_sent(user.user_key, sid, now)
     previous = {k: v for k, v in previous.items() if now - datetime.fromisoformat(v["at"]) <= MAX_AGE}
     store.set("market_floors", json.dumps(previous))

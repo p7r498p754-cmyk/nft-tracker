@@ -69,7 +69,7 @@ def _deliver(cfg: Settings, tg: TelegramClient, chat: int, sig: Signal, link: st
             tg.send_photo(chat, sig.event.photo_url, text, kb)
             return
         except TelegramError as e:
-            if e.blocked:
+            if e.code != 400:
                 raise
     tg.send(chat, text, kb)
 

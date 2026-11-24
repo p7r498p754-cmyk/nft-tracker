@@ -180,6 +180,13 @@ class Cycle(unittest.TestCase):
         tg.fail = {}
         self.assertEqual(monitor.run_cycle(cfg, store, tg, pt, NOW + timedelta(minutes=5)).alerts, 1)
 
+    def test_photo_timeout_never_sends_second_copy(self):
+        cfg, store, tg, pt = setup(purchases=GOOD_SALES, listings=[cheap(photo="https://nft.fragment.com/gift/x.jpg")])
+        tg.fail = {"photo": TelegramError("timeout")}
+        report = monitor.run_cycle(cfg, store, tg, pt, NOW)
+        self.assertEqual(report.alerts, 0)
+        self.assertFalse(tg.sent)
+
     def test_photo_used_when_available_and_falls_back(self):
         cfg, store, tg, pt = setup(purchases=GOOD_SALES,
                                    listings=[cheap(photo="https://nft.fragment.com/gift/x.jpg")])
