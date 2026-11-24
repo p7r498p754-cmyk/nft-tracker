@@ -179,7 +179,7 @@ async function testBotUpdate(env, update, now, send) {
     }
     if (m.from?.id !== uid || typeof m.text !== "string") return;
     const [raw, requested] = m.text.trim().split(/\s+/, 2);
-    const command = raw.split("@", 1)[0];
+    const command = raw.split("@", 1)[0].toLowerCase();
     if (command === "/buy" && Object.hasOwn(PRICES, requested?.toUpperCase())) {
         const plan = requested.toUpperCase();
         if (await currentPlan(env.LEDGER, uid, now) !== "FREE") {
@@ -196,13 +196,10 @@ async function testBotUpdate(env, update, now, send) {
         });
         return;
     }
-    if (command === "/start" || command === "/subscription" || command === "/buy") {
-        const plan = await currentPlan(env.LEDGER, uid, now);
-        const text = ordinaryPreview(env)
-            ? "NFT Tracker · демо без списаний. Для просмотра счёта отправьте /buy PLUS, /buy PRO или /buy ULTRA."
-            : `NFT Tracker · тестовая среда. Ваш тариф: ${plan}.\nПроверка оплаты: /buy PLUS, /buy PRO или /buy ULTRA.\nПосле оплаты: /subscription.`;
-        await call("sendMessage", { chat_id: uid, text });
-    }
+    const text = ordinaryPreview(env)
+        ? "NFT Tracker · демо без списаний. Для просмотра счёта отправьте /buy PLUS, /buy PRO или /buy ULTRA."
+        : `NFT Tracker · тестовая среда. Ваш тариф: ${await currentPlan(env.LEDGER, uid, now)}.\nПроверка оплаты: /buy PLUS, /buy PRO или /buy ULTRA.\nПосле оплаты: /subscription.`;
+    await call("sendMessage", { chat_id: uid, text });
 }
 
 export async function handle(request, env, compare = crypto.subtle.timingSafeEqual.bind(crypto.subtle), send = fetch) {
@@ -221,7 +218,13 @@ export async function handle(request, env, compare = crypto.subtle.timingSafeEqu
     if (request.method === "POST" && path === "/setup") {
         if (!await authorized(request, env.STAGING_SETUP_SECRET, compare)) return new Response(null, { status: 404 });
         const status = await connectTestBot(env, send);
-        return Response.json({ telegram: status });
+        if (status !== "ready") return Response.json({ telegram: status });
+        const bot = await telegram(env, "getMe", {}, send);
+        const webhook = await telegram(env, "getWebhookInfo", {}, send);
+        return Response.json({ telegram: status, username: bot.username,
+            webhookMatches: webhook.url === env.STAGING_WEBHOOK_URL,
+            pending: webhook.pending_update_count, lastError: webhook.last_error_message,
+            lastErrorAt: webhook.last_error_date, allowedUpdates: webhook.allowed_updates });
     }
     if (request.method !== "POST" || !["/telegram", "/fixtures/order", "/fixtures/access"].includes(path)) {
         return new Response(null, { status: 404 });
@@ -244,6 +247,8 @@ export async function handle(request, env, compare = crypto.subtle.timingSafeEqu
             return Response.json({ plan: await currentPlan(db, input.uid, now) });
         }
         if (env.TELEGRAM_TEST_BOT_TOKEN) {
+            console.log(JSON.stringify({ event: "telegram_webhook_received",
+                kind: input.pre_checkout_query ? "checkout" : input.message ? "message" : "other" }));
             await testBotUpdate(env, input, now, send);
             return new Response(null, { status: 204 });
         }
