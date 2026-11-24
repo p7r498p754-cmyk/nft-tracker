@@ -101,7 +101,7 @@ def http_error(code, body=b"", headers=None):
 
 
 def message(text, chat=OWNER, update_id=1, kind="private"):
-    return {"update_id": update_id, "message": {"text": text, "chat": {"id": chat, "type": kind}}}
+    return {"update_id": update_id, "message": {"from": {"id": chat}, "text": text, "chat": {"id": chat, "type": kind}}}
 
 
 def callback(data, chat=OWNER, update_id=1, sender=None):

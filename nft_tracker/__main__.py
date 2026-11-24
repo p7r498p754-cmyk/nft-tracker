@@ -19,7 +19,7 @@ from .storage import Storage
 from .telegram import TelegramClient, TelegramError
 
 LOG = logging.getLogger("nft_tracker")
-ACTION_LISTEN_SECONDS = 300
+ACTION_LISTEN_SECONDS = 600
 
 
 def _setup_logging(cfg: Settings) -> None:
@@ -115,7 +115,7 @@ def market_worker(cfg, portals, stop, once):
                 except (OSError, ValueError, TelegramError) as error:
                     LOG.warning("Обновление цен коллекций: %s", error)
                     ok = False
-                next_floors = time.monotonic() + 300
+                next_floors = started + cfg.scan_seconds
             if once:
                 return ok
             stop.wait(max(0, started + cfg.scan_seconds - time.monotonic()))

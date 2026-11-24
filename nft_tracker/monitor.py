@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from .bot import OWNER
+from .subscriptions import PLANS, reserve_alert
+from .service import effective_access, prefs, fits, limits, threshold
 from .config import Settings
 from .portals import PortalsClient, PortalsError
 from .storage import Storage, User, iso
@@ -56,8 +58,11 @@ def _notice(store: Storage, tg: TelegramClient, cfg: Settings, key: str, text: s
         pass
 
 
-def _deliver(cfg: Settings, tg: TelegramClient, chat: int, sig: Signal, link: str | None, now: datetime) -> None:
+def _deliver(cfg: Settings, tg: TelegramClient, chat: int, sig: Signal, link: str | None, now: datetime, detailed=False) -> None:
     text = format_alert(sig, cfg.price_unit, now, cfg.timezone, bool(link))
+    if detailed:
+        text += (f"\nПоследняя сопоставимая продажа: {sig.estimate.newest:%d.%m.%Y %H:%M} UTC."
+                 "\nВыбросы отсекаются по медианному абсолютному отклонению. Оценка пропускается при большом разбросе.")
     kb = alert_keyboard(link)
     if sig.event.photo_url and len(text) <= 1024:
         try:
@@ -130,6 +135,9 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
     retry_needed = False
     sales = store.sales()
     users = store.active_users()
+    plans = {u.user_key: effective_access(cfg, store, u.chat_id or cfg.owner_chat_id, int(now.timestamp()))[0] for u in users}
+    discounts = {u.user_key: threshold(store, u, PLANS[plans[u.user_key]]) for u in users}
+    settings = {u.user_key: prefs(store, u.user_key) for u in users}
     rep.recipients = len(users)
     max_age = timedelta(minutes=cfg.max_event_age_min)
     verified: dict[tuple[str, Decimal], bool] = {}
@@ -144,7 +152,10 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         if now - ev.event_time > max_age or ev.event_time > now + timedelta(minutes=5):
             continue
         for user in users:
-            sig = evaluate(ev, sales, user.min_discount, now, cfg.model_extra_margin)
+            plan = PLANS[plans[user.user_key]]
+            if not fits(ev, settings[user.user_key], plan):
+                continue
+            sig = evaluate(ev, sales, discounts[user.user_key], now, cfg.model_extra_margin)
             if sig is None:
                 continue
             sid = signal_id(sig)
@@ -195,9 +206,18 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         if store.user(user.user_key) != user:
             continue
         chat = user.chat_id if user.chat_id is not None else cfg.owner_chat_id
+        tier = effective_access(cfg, store, chat, int(now.timestamp()))[0]
+        if tier != plans[user.user_key] or not fits(ev, prefs(store,user.user_key), PLANS[tier]):
+            continue
+        if not reserve_alert(store.db, user.user_key, sid, now.date().isoformat(), limits(store,tier)[0]):
+            continue
         try:
-            _deliver(cfg, tg, chat, sig, link, now)
+            _deliver(cfg, tg, chat, sig, link, now, detailed=PLANS[tier].level >= 2)
         except TelegramError as e:
+            # A known rejection did not post a message. Ambiguous network failures keep their slot.
+            if e.code is not None:
+                with store.db:
+                    store.db.execute("DELETE FROM alert_slots WHERE user_key=? AND signal=?", (user.user_key, sid))
             if e.blocked:
                 store.set_active(user.user_key, False)
             else:
@@ -214,6 +234,16 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         _notice(store, tg, cfg, "no_link",
                 f"ℹ️ Найдено сигналов: {no_link_hits}, но прямая ссылка на лот не настроена, поэтому они не отправлены. "
                 "Как это исправить — в README (раздел «Прямая ссылка»).", now)
+    yesterday = (now - timedelta(days=1)).date().isoformat()
+    for user in users:
+        if PLANS[plans[user.user_key]].level and store.get("summary:"+user.user_key) != yesterday:
+            count = store.db.execute("SELECT count(*) FROM deliveries WHERE user_key=? AND substr(sent_at,1,10)=?",
+                                     (user.user_key,yesterday)).fetchone()[0]
+            try:
+                tg.send(user.chat_id or cfg.owner_chat_id, f"Сводка за {yesterday} UTC: доставлено предложений — {count}.")
+                store.set("summary:"+user.user_key, yesterday)
+            except TelegramError:
+                pass
     store.prune(now)
     _record(store, tg, cfg, rep, now)
     return rep

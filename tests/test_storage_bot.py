@@ -110,6 +110,8 @@ class BotTests(unittest.TestCase):
 
     def test_discount_setting_via_callback_and_whitelist(self):
         self.run_updates(message("/start"))
+        from tests.test_subscriptions import grant
+        grant(self.store,OWNER,"PLUS")
         self.run_updates(callback("set:discount:40", update_id=2))
         self.assertEqual(self.store.user("owner").min_discount, 40)
         self.run_updates(callback("set:discount:5", update_id=3))       # not an allowed choice

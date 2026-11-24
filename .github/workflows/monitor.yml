@@ -8,7 +8,7 @@ on:
       - 'nft_tracker/**'
       - '.github/workflows/monitor.yml'
   schedule:
-    - cron: "4-59/5 * * * *"     # about every 5 minutes (off the congested :00 slot)
+    - cron: "4-59/10 * * * *"     # about every 10 minutes (off the congested :00 slot)
   workflow_dispatch:
     inputs:
       check_delivery:
@@ -27,7 +27,7 @@ jobs:
   scan:
     if: github.event.repository.private == false
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

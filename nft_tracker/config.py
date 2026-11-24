@@ -45,10 +45,11 @@ class Settings:
     default_discount: int = 30
     model_extra_margin: Decimal = Decimal("10")
     allow_no_link_alerts: bool = False
-    scan_seconds: int = 300
+    scan_seconds: int = 600
     listing_pages: int = 12   # 20 events/page; Portals allows offsets through 700
     on_actions: bool = False
     github_event: str = ""
+    public_users: bool = False
 
     @property
     def setup_mode(self) -> bool:
@@ -87,8 +88,9 @@ class Settings:
             default_discount=_int(env, "DEFAULT_DISCOUNT", 30, 30, 90),
             model_extra_margin=margin,
             allow_no_link_alerts=_flag(env, "ALLOW_NO_LINK_ALERTS"),
-            scan_seconds=_int(env, "SCAN_SECONDS", 300, 60, 86400),
+            scan_seconds=_int(env, "SCAN_SECONDS", 600, 60, 86400),
             listing_pages=_int(env, "LISTING_PAGES", 12, 1, 36),
+            public_users=_flag(env, "PUBLIC_USERS") and not _flag(env, "GITHUB_ACTIONS") and int(owner) > 0,
             github_event=env.get("GITHUB_EVENT_NAME", ""),
             on_actions=env.get("GITHUB_ACTIONS", "").lower() == "true",
         )
