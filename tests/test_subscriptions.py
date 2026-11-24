@@ -181,3 +181,15 @@ class SubscriptionTests(TestCase):
         self.assertIn("Ваш тариф: <b>FREE</b>", self.tg.sent[-1][1])
         self.send("/admin preview PRO", OWNER)
         self.assertIn("Ваш тариф: <b>FREE</b>", self.send("/admin preview FREE", OWNER))
+
+    def test_lifetime_ultra_belongs_to_owner_and_returns_after_preview(self):
+        from dataclasses import replace
+        self.cfg = replace(self.cfg, owner_lifetime_ultra=True)
+        self.assertIn("Ваш тариф: <b>ULTRA</b> · бессрочно", self.send("/subscription", OWNER))
+        self.assertIn("Ваш тариф: <b>FREE</b>", self.send("/subscription"))
+        self.send("/admin preview PLUS", OWNER)
+        self.assertIn("Тестовый доступ владельца", self.send("/subscription", OWNER))
+        self.assertIn("Ваш тариф: <b>ULTRA</b>", self.send("/admin preview FREE", OWNER))
+        handle_update(self.cfg, self.store, self.tg, message("/subscription", chat=OWNER), NOW+timedelta(days=3650))
+        self.assertIn("ULTRA</b> · бессрочно", self.tg.sent[-1][1])
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM star_terms").fetchone()[0], 0)
