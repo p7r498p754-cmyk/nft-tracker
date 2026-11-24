@@ -135,6 +135,8 @@ def format_alert(sig: Signal, unit: str, found_at: datetime, tz_name: str, has_l
         "🚨 <b>НАЙДЕН ДЕШЁВЫЙ NFT!</b>", "",
         f"💎 Коллекция: {html.escape(ev.name)}",
         f"🎨 Модель: {html.escape(ev.model or '—')}",
+        f"🖼 Фон: {html.escape(ev.backdrop or '—')}",
+        f"🔹 Узор (символ): {html.escape(ev.symbol or '—')}",
         f"🔢 Номер: {html.escape('#' + ev.number if ev.number else '—')}",
         f"💰 Цена объявления: {fmt_price(ev.price, unit)}",
         f"📊 Рыночная оценка: {fmt_price(est.value, unit)}",
