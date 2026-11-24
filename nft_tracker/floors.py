@@ -6,6 +6,8 @@ from decimal import Decimal
 
 from .catalog import fetch_catalog, update_catalog
 from .config import Settings
+from .service import prefs, limits, threshold
+from .subscriptions import PLANS, entitlement, reserve_alert
 from .portals import dec, parse_date
 from .storage import Storage
 from .telegram import TelegramClient
@@ -28,6 +30,8 @@ def observations(data, now):
         for offer in gift["offers"]:
             if not isinstance(offer, dict):
                 continue
+            if not isinstance(offer,dict):
+                raise ValueError("Некорректное предложение")
             market = offer.get("market")
             if market not in MARKETS or offer.get("currency") != MARKETS[market]:
                 continue
@@ -43,23 +47,45 @@ def refresh(store, tg, cfg, data, now):
     rows = observations(data, now)
     update_catalog(store, data, now)
     previous = store.get_json("market_floors")
-    user = store.user("owner")
-    changes = []
+    drops = []
     for key, row in rows.items():
         old = previous.get(key)
         if old and row["at"] <= old["at"]:
             continue
-        if user and user.active and old and now - datetime.fromisoformat(old["at"]) <= MAX_AGE:
-            before, after = Decimal(old["price"]), Decimal(row["price"])
-            if after * 100 <= before * (100 - user.min_discount):
-                changes.append(f"{row['market'].capitalize()} · {html.escape(row['name'])}: "
-                               f"{before} → {after} {MARKETS[row['market']]}")
+        if old and now - datetime.fromisoformat(old["at"]) <= MAX_AGE:
+            drops.append((key, row, Decimal(old["price"])))
         previous[key] = row
-    if changes:
-        lines = ["Снижение минимальной цены коллекции (StarPrice)", *changes[:15]]
-        if len(changes) > 15:
-            lines.append(f"Ещё коллекций: {len(changes)-15}")
-        tg.send(cfg.owner_chat_id, "\n".join(lines))
+    for user in store.active_users():
+        uid = user.chat_id or cfg.owner_chat_id
+        name = entitlement(store.db, uid, int(now.timestamp()))[0]
+        plan = PLANS[name]
+        settings = prefs(store, user.user_key)
+        selected = settings.get("favorites", [])[:plan.favorites]
+        discount = threshold(store, user, plan)
+        changes = []
+        for key, row, before in drops:
+            collection = row["name"].casefold()
+            after = Decimal(row["price"])
+            if selected and collection not in selected:
+                continue
+            if plan.level and (settings.get("market", row["market"]) != row["market"]
+                               or not Decimal(settings.get("min","0")) <= after <= Decimal(settings.get("max","Infinity"))):
+                continue
+            if plan.level >= 2 and any(settings.get(k) for k in ("model","backdrop","symbol")):
+                continue  # A collection floor carries no individual gift attributes.
+            if plan.level >= 3 and collection in settings.get("exclude", []):
+                continue
+            if after * 100 <= before * (100 - discount):
+                changes.append((key, row, before))
+        if changes:
+            first, row, _ = changes[0]
+            sid = "floor:" + first + ":" + row["at"]
+            if reserve_alert(store.db, user.user_key, sid, now.date().isoformat(), limits(store,name)[0]):
+                lines = ["Снижение ориентира коллекции · StarPrice"]
+                for _, row, before in changes[:15]:
+                    lines.append(f"{row['market']} · {html.escape(row['name'])}: {before} → {row['price']} {MARKETS[row['market']]}")
+                tg.send(uid, "\n".join(lines))
+                store.mark_sent(user.user_key, sid, now)
     previous = {k: v for k, v in previous.items() if now - datetime.fromisoformat(v["at"]) <= MAX_AGE}
     store.set("market_floors", json.dumps(previous))
     return len(rows)

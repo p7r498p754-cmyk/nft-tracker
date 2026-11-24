@@ -52,7 +52,7 @@ class ExitStatuses(unittest.TestCase):
         from nft_tracker.__main__ import market_worker
         stop = Event()
         cfg = make_settings(scan_seconds=300)
-        with patch("nft_tracker.__main__.time.monotonic", side_effect=[10, 45, 50]), \
+        with patch("nft_tracker.__main__.time.monotonic", side_effect=[10, 50]), \
              patch("nft_tracker.__main__.scan_market"), \
              patch("nft_tracker.__main__.fetch_catalog", return_value={"gifts": []}), \
              patch("nft_tracker.__main__.refresh") as refresh, \

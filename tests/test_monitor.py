@@ -156,6 +156,8 @@ class Cycle(unittest.TestCase):
 
     def test_user_threshold_respected(self):
         cfg, store, tg, pt = setup(purchases=GOOD_SALES, listings=[cheap()])
+        from tests.test_subscriptions import grant
+        grant(store,cfg.owner_chat_id,"PLUS")
         store.set_min_discount("owner", 50)           # listing is 40% below
         self.assertEqual(monitor.run_cycle(cfg, store, tg, pt, NOW).alerts, 0)
 

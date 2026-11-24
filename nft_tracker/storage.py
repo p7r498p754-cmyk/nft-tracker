@@ -1,7 +1,7 @@
 """SQLite state. Single file, no WAL, so it can be cached/restored between runs.
 
-Owner mode keeps NO raw chat id in the database (user_key 'owner'), so the
-state file carries no personal identifiers."""
+Owner-only mode uses the symbolic owner key. Multi-user deployments require
+private storage because recipient identifiers are needed to deliver alerts."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
+from .subscriptions import SCHEMA as SUBSCRIPTION_SCHEMA
 from .valuation import HISTORY_DAYS, MarketEvent
 
 SCHEMA = """
@@ -53,8 +54,17 @@ class Storage:
         # also releases test/exception-path connections safely.
         self._finalizer = weakref.finalize(self, self.db.close)
         self.db.execute("PRAGMA foreign_keys = ON")
-        self.db.executescript(SCHEMA)
-        self.db.commit()
+        self.db.executescript(SCHEMA + SUBSCRIPTION_SCHEMA)
+        # Backfill deduplication and day budgets for databases created by 0.5.x.
+        if not self.get("subscription_migration_v1"):
+            with self.db:
+                self.db.execute("""INSERT OR IGNORE INTO alert_slots(user_key,signal,day)
+                    SELECT user_key,signal_id,substr(sent_at,1,10) FROM deliveries""")
+                snapshot = self.get_json("price_catalog")
+                if snapshot.get("at") and snapshot.get("rows"):
+                    self.db.execute("INSERT OR IGNORE INTO price_history VALUES (?,?)",
+                                    (snapshot["at"], json.dumps(snapshot, ensure_ascii=False)))
+                self.set("subscription_migration_v1","1")
 
     def close(self) -> None:
         self._finalizer()
@@ -105,6 +115,7 @@ class Storage:
 
     def delete_user(self, user_key: str) -> None:
         """Removes the user, their settings and delivery history (FK cascade)."""
+        self.db.execute("DELETE FROM state WHERE key=?", ("summary:" + user_key,))
         self.db.execute("DELETE FROM users WHERE user_key=?", (user_key,))
         self.db.commit()
 
@@ -141,6 +152,7 @@ class Storage:
         return self.db.execute("SELECT COUNT(*) FROM sales").fetchone()[0]
 
     def prune(self, now: datetime) -> None:
+        self.db.execute("DELETE FROM alert_slots WHERE day < ?", ((now - timedelta(days=HISTORY_DAYS)).date().isoformat(),))
         self.db.execute("DELETE FROM sales WHERE event_time < ?", (iso(now - timedelta(days=HISTORY_DAYS + 1)),))
         self.db.execute("DELETE FROM deliveries WHERE sent_at < ?", (iso(now - timedelta(days=HISTORY_DAYS)),))
         self.db.commit()

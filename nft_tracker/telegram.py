@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import html
 import json
+import uuid
 import time
 import urllib.error
 import urllib.parse
@@ -62,6 +63,22 @@ class TelegramClient:
         if keyboard:
             payload["reply_markup"] = {"inline_keyboard": keyboard}
         return self.call("sendMessage", payload)
+
+    def send_csv(self, chat_id, content):
+        boundary = uuid.uuid4().hex
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
+                f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="prices.csv"\r\n'
+                f'Content-Type: text/csv; charset=utf-8\r\n\r\n{content}\r\n--{boundary}--\r\n').encode()
+        req = urllib.request.Request(API + urllib.parse.quote(self._token, safe=":") + "/sendDocument",
+                                     data=body, headers={"Content-Type": "multipart/form-data; boundary=" + boundary})
+        try:
+            with self._open(req, timeout=TIMEOUT) as response:
+                if json.load(response).get("ok") is not True:
+                    raise TelegramError("Telegram не подтвердил передачу CSV")
+        except urllib.error.HTTPError as e:
+            raise TelegramError("Ошибка отправки CSV", e.code) from None
+        except (OSError, ValueError, AttributeError):
+            raise TelegramError("Не удалось отправить CSV") from None
 
     def send_photo(self, chat_id: int, photo: str, caption: str, keyboard: list | None = None) -> Any:
         payload: dict = {"chat_id": chat_id, "photo": photo, "caption": caption, "parse_mode": "HTML"}
