@@ -1,4 +1,4 @@
-// Isolated preview. Telegram calls always target the test Bot API.
+// Isolated preview. The normal Telegram API can only show invoices and reject checkout.
 const PRICES = { PLUS: 99, PRO: 199, ULTRA: 399 };
 const ACCESS_SECONDS = 30 * 86400;
 const MAX_BODY_BYTES = 16_384;
@@ -102,34 +102,55 @@ async function currentPlan(db, uid, now) {
     return row?.plan ?? "FREE";
 }
 
-async function telegram(token, method, payload = {}, send = fetch) {
+function ordinaryPreview(env) {
+    return env.STAGING_TELEGRAM_MODE === "ordinary-preview";
+}
+
+async function telegram(env, method, payload = {}, send = fetch) {
+    const token = env.TELEGRAM_TEST_BOT_TOKEN;
     if (!/^[0-9]+:[A-Za-z0-9_-]+$/.test(token)) throw new Error("invalid_test_token");
-    const response = await send(`https://api.telegram.org/bot${token}/test/${method}`, {
+    const preview = ordinaryPreview(env);
+    const path = preview ? "" : "/test";
+    if (preview && method === "answerPreCheckoutQuery" && payload.ok !== false) {
+        throw new Error("ordinary_preview_requires_rejection");
+    }
+    const response = await send(`https://api.telegram.org/bot${token}${path}/${method}`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload), signal: AbortSignal.timeout(4000),
     });
     const data = await response.json();
-    if (!response.ok || data.ok !== true) throw new Error("test_api_rejected");
+    if (!response.ok || data.ok !== true) {
+        const error = new Error("test_api_rejected");
+        error.status = response.status;
+        throw error;
+    }
     return data.result;
 }
 
 export async function connectTestBot(env, send = fetch) {
     const token = env.TELEGRAM_TEST_BOT_TOKEN;
     if (!token || !env.STAGING_WEBHOOK_SECRET || !env.STAGING_WEBHOOK_URL) return "waiting_for_token";
-    const ready = await env.LEDGER.prepare("SELECT status FROM staging_connection WHERE id=1").first();
+    const mode = ordinaryPreview(env) ? "ordinary-preview" : "test";
+    const ready = await env.LEDGER.prepare("SELECT status FROM staging_webhook_mode WHERE mode=?").bind(mode).first();
     if (ready?.status === "ready") return "ready";
     try {
-        const bot = await telegram(token, "getMe", {}, send);
+        let bot;
+        try {
+            bot = await telegram(env, "getMe", {}, send);
+        } catch (error) {
+            if (error.status === 401 || error.status === 404) return "invalid_test_token";
+            throw error;
+        }
         if (bot.username?.toLowerCase() !== env.TELEGRAM_TEST_BOT_USERNAME) return "wrong_test_bot";
-        const existing = await telegram(token, "getWebhookInfo", {}, send);
+        const existing = await telegram(env, "getWebhookInfo", {}, send);
         if (existing.url && existing.url !== env.STAGING_WEBHOOK_URL) return "other_webhook";
-        if (await telegram(token, "setWebhook", {
+        if (await telegram(env, "setWebhook", {
             url: env.STAGING_WEBHOOK_URL, secret_token: env.STAGING_WEBHOOK_SECRET, max_connections: 1,
             allowed_updates: ["message", "pre_checkout_query"], drop_pending_updates: false,
         }, send) !== true) return "test_api_rejected";
-        const webhook = await telegram(token, "getWebhookInfo", {}, send);
+        const webhook = await telegram(env, "getWebhookInfo", {}, send);
         if (webhook.url !== env.STAGING_WEBHOOK_URL) return "test_api_rejected";
-        await env.LEDGER.prepare("INSERT OR REPLACE INTO staging_connection VALUES (1,'ready')").run();
+        await env.LEDGER.prepare("INSERT OR REPLACE INTO staging_webhook_mode VALUES (?,'ready')").bind(mode).run();
         return "ready";
     } catch {
         return "test_api_rejected";
@@ -137,13 +158,15 @@ export async function connectTestBot(env, send = fetch) {
 }
 
 async function testBotUpdate(env, update, now, send) {
-    const call = (method, fields) => telegram(env.TELEGRAM_TEST_BOT_TOKEN, method, fields, send);
+    const call = (method, fields) => telegram(env, method, fields, send);
     if (update.pre_checkout_query) {
         const q = update.pre_checkout_query;
         if (!textId(q.id)) return;
-        const { approved } = await checkout(env.LEDGER, q, now);
+        const preview = ordinaryPreview(env);
+        const approved = preview ? false : (await checkout(env.LEDGER, q, now)).approved;
         await call("answerPreCheckoutQuery", { pre_checkout_query_id: q.id, ok: approved,
-            ...(approved ? {} : { error_message: "Тестовый счёт недоступен. Попробуйте /subscription." }) });
+            ...(approved ? {} : { error_message: preview ? "Проверка завершена. Этот счёт нельзя оплатить, Stars не списаны."
+                : "Тестовый счёт недоступен. Попробуйте /subscription." }) });
         return;
     }
     const m = update.message;
@@ -151,7 +174,7 @@ async function testBotUpdate(env, update, now, send) {
     if (m?.chat?.type !== "private" || !validId(uid)) return;
     if (m.successful_payment || m.refunded_payment) {
         // The ledger itself is the source of truth, so replay cannot send another message or grant.
-        await settle(env.LEDGER, m, now);
+        if (!ordinaryPreview(env)) await settle(env.LEDGER, m, now);
         return;
     }
     if (m.from?.id !== uid || typeof m.text !== "string") return;
@@ -165,7 +188,9 @@ async function testBotUpdate(env, update, now, send) {
         }
         const { payload, amount } = await createOrder(env.LEDGER, uid, plan, now);
         await call("sendInvoice", {
-            chat_id: uid, title: `NFT Tracker TEST · ${plan}`, description: "Тестовый доступ на 30 дней",
+            chat_id: uid, title: `NFT Tracker DEMO · ${plan}`,
+            description: ordinaryPreview(env) ? "Демонстрационный счёт. Оплата отключена. Не пополняйте баланс для проверки."
+                : "Тестовый доступ на 30 дней",
             payload, provider_token: "", currency: "XTR", prices: [{ label: plan, amount }],
             start_parameter: "staging",
         });
@@ -173,8 +198,10 @@ async function testBotUpdate(env, update, now, send) {
     }
     if (command === "/start" || command === "/subscription" || command === "/buy") {
         const plan = await currentPlan(env.LEDGER, uid, now);
-        await call("sendMessage", { chat_id: uid, text:
-            `NFT Tracker · тестовая среда. Ваш тариф: ${plan}.\nПроверка оплаты: /buy PLUS, /buy PRO или /buy ULTRA.\nПосле оплаты: /subscription.` });
+        const text = ordinaryPreview(env)
+            ? "NFT Tracker · демо без списаний. Для просмотра счёта отправьте /buy PLUS, /buy PRO или /buy ULTRA."
+            : `NFT Tracker · тестовая среда. Ваш тариф: ${plan}.\nПроверка оплаты: /buy PLUS, /buy PRO или /buy ULTRA.\nПосле оплаты: /subscription.`;
+        await call("sendMessage", { chat_id: uid, text });
     }
 }
 
@@ -184,11 +211,17 @@ export async function handle(request, env, compare = crypto.subtle.timingSafeEqu
     if (request.method === "GET" && path === "/health") {
         try {
             await db.prepare("SELECT payload FROM orders LIMIT 1").first();
-            const connection = await db.prepare("SELECT status FROM staging_connection WHERE id=1").first();
+            const mode = ordinaryPreview(env) ? "ordinary-preview" : "test";
+            const connection = await db.prepare("SELECT status FROM staging_webhook_mode WHERE mode=?").bind(mode).first();
             return Response.json({ status: "ok", mode: "staging", telegram: connection?.status ?? "pending" });
         } catch {
             return Response.json({ status: "unavailable" }, { status: 503 });
         }
+    }
+    if (request.method === "POST" && path === "/setup") {
+        if (!await authorized(request, env.STAGING_SETUP_SECRET, compare)) return new Response(null, { status: 404 });
+        const status = await connectTestBot(env, send);
+        return Response.json({ telegram: status });
     }
     if (request.method !== "POST" || !["/telegram", "/fixtures/order", "/fixtures/access"].includes(path)) {
         return new Response(null, { status: 404 });

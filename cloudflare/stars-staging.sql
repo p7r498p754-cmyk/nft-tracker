@@ -13,7 +13,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS pending_checkout
     ON orders(user_id) WHERE checkout_id IS NOT NULL AND charge_id IS NULL;
 CREATE INDEX IF NOT EXISTS user_access ON orders(user_id, paid_at);
 
-CREATE TABLE IF NOT EXISTS staging_connection (
-    id INTEGER PRIMARY KEY CHECK (id=1),
+CREATE TABLE IF NOT EXISTS staging_webhook_mode (
+    mode TEXT PRIMARY KEY,
     status TEXT NOT NULL CHECK (status='ready')
 );

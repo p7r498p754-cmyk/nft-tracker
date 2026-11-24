@@ -91,5 +91,23 @@ test("staging webhook validates order, persists one receipt, and revokes refunde
     assert.equal(invoice.currency, "XTR");
     assert.equal(invoice.prices[0].amount, 99);
     assert.equal(invoice.subscription_period, undefined);
+    const previewEnv = { ...telegramEnv, STAGING_TELEGRAM_MODE: "ordinary-preview" };
+    let checkoutResponse;
+    const previewApi = async (url, options) => {
+        assert.match(url, /^https:\/\/api\.telegram\.org\/bot[0-9]+:[^/]+\/answerPreCheckoutQuery$/);
+        checkoutResponse = JSON.parse(options.body);
+        return Response.json({ ok: true, result: true });
+    };
+    const deliverPreview = body => handle(new Request("https://preview.example/telegram", {
+        method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": env.STAGING_WEBHOOK_SECRET },
+        body: JSON.stringify(body),
+    }), previewEnv, compare, previewApi);
+    const payment = { invoice_payload: invoice.payload, total_amount: 99, currency: "XTR" };
+    assert.equal((await deliverPreview({ pre_checkout_query: { ...payment, id: "ordinary", from: { id: 18 } } })).status, 204);
+    assert.equal(checkoutResponse.ok, false);
+    assert.equal(sqlite.prepare("SELECT checkout_id FROM orders WHERE payload=?").get(invoice.payload).checkout_id, null);
+    assert.equal((await deliverPreview({ message: { chat: { type: "private", id: 18 }, from: { id: 18 }, date: stamp,
+        successful_payment: { ...payment, telegram_payment_charge_id: "ordinary-charge" } } })).status, 204);
+    assert.equal(sqlite.prepare("SELECT charge_id FROM orders WHERE payload=?").get(invoice.payload).charge_id, null);
     sqlite.close();
 });
