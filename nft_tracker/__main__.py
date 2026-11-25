@@ -129,6 +129,15 @@ def market_worker(cfg, portals, stop, once):
         store.close()
 
 
+def verify_polling_host(tg):
+    identity = tg.call("getMe", timeout=5)
+    if not isinstance(identity, dict) or identity.get("is_bot") is not True or str(identity.get("username")).lower() != "nfttrecker_bot":
+        raise TelegramError("Ожидался основной бот @nfttrecker_bot")
+    status = tg.call("getWebhookInfo", timeout=5)
+    if not isinstance(status, dict) or status.get("url") != "":
+        raise TelegramError("Перед запуском polling проверьте активный webhook")
+
+
 def run_loop(cfg, store, tg, portals, *, once=False):
     stop = Event()
     commands_ok = True
@@ -209,6 +218,12 @@ def main(argv: list[str]) -> int:
             return 0
     store, tg, portals = _make(cfg)
     try:
+        if cmd == "loop" and cfg.stars_payments:
+            try:
+                verify_polling_host(tg)
+            except TelegramError as error:
+                LOG.error("Запуск приёма платежей остановлен: %s", error)
+                return 1
         if cmd == "run":
             ok = cycle_once(cfg, store, tg, portals)
             warm_catalog(cfg)

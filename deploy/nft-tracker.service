@@ -1,0 +1,24 @@
+[Unit]
+Description=NFT Tracker Telegram bot and marketplace monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/nft-tracker
+EnvironmentFile=/etc/nft-tracker.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m nft_tracker loop
+Restart=on-failure
+RestartSec=10
+StateDirectory=nft-tracker
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
