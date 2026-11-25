@@ -41,6 +41,18 @@ def _order(db, uid, event):
                       (payload, uid, amount)).fetchone()
 
 
+def pending_plan(db, uid):
+    row = db.execute("""SELECT o.plan FROM star_checkouts c JOIN star_orders o USING(payload)
+        WHERE o.uid=? AND c.query_id IS NOT NULL AND c.completed_charge IS NULL LIMIT 1""",
+                     (uid,)).fetchone()
+    return row[0] if row else None
+
+
+def pending_message(plan):
+    return (f"Ожидается подтверждение оплаты тарифа {plan} от Telegram. "
+            "Если Stars уже списались, повторная оплата не нужна. Если доступ не появился, откройте /paysupport.")
+
+
 def reserve_checkout(db, uid, query, now):
     with db:
         db.execute("BEGIN IMMEDIATE")
@@ -49,13 +61,11 @@ def reserve_checkout(db, uid, query, now):
         if order is None or not isinstance(query_id, str) or not query_id or order[3] is not None:
             return False
         _, expires, existing_query, _ = order
-        if existing_query is not None:
-            return existing_query == query_id
         if expires <= now or entitlement(db, uid, now)[0] != "FREE":
             return False
-        outstanding = db.execute("""SELECT 1 FROM star_checkouts c JOIN star_orders o USING(payload)
-            WHERE o.uid=? AND c.query_id IS NOT NULL AND c.completed_charge IS NULL""", (uid,)).fetchone()
-        if outstanding or db.execute("SELECT 1 FROM star_checkouts WHERE query_id=?", (query_id,)).fetchone():
+        if existing_query is not None:
+            return existing_query == query_id
+        if pending_plan(db, uid) or db.execute("SELECT 1 FROM star_checkouts WHERE query_id=?", (query_id,)).fetchone():
             return False
         db.execute("UPDATE star_checkouts SET query_id=? WHERE payload=?", (query_id, query["invoice_payload"]))
         return True
@@ -97,11 +107,13 @@ def settle_receipt(db, uid, event, paid_at, *, refund=False):
         if refund:
             db.execute("INSERT OR IGNORE INTO star_refunds VALUES (?,?)", (charge, payload))
             return None
-        if completed is not None or event.get("is_recurring") or event.get("subscription_expiration_date"):
-            if completed is None:
-                raise ValueError("Unexpected recurring payment")
+        if event.get("is_recurring") or event.get("subscription_expiration_date"):
+            raise ValueError("Unexpected recurring payment")
+        if db.execute("SELECT 1 FROM star_terms WHERE charge=?", (charge,)).fetchone():
             return None
         if type(paid_at) is not int or not 0 < paid_at <= 253402300799 - MONTH:
             raise ValueError("Invalid payment date")
         db.execute("INSERT INTO star_terms VALUES (?,?,?,?)", (charge, payload, paid_at, paid_at + MONTH))
+        if db.execute("SELECT 1 FROM star_refunds WHERE charge=?", (charge,)).fetchone():
+            return None
         return plan

@@ -28,8 +28,8 @@ class StarsPayments(TestCase):
     def update(self, data, at=NOW):
         handle_update(self.cfg, self.store, self.telegram, data, at)
 
-    def invoice(self, plan="PRO"):
-        self.update(callback("buy:" + plan, chat=self.uid))
+    def invoice(self, plan="PRO", at=NOW):
+        self.update(callback("buy:" + plan, chat=self.uid), at)
         method, payload = self.telegram.call.call_args.args
         self.assertEqual(method, "sendInvoice")
         self.assertEqual(payload["currency"], "XTR")
@@ -66,13 +66,14 @@ class StarsPayments(TestCase):
         event = self.invoice()
         self.receipt(event)
         self.assertEqual(entitlement(self.store.db,self.uid,self.stamp)[0],"FREE")
+        other = self.invoice("PLUS")
         self.assertFalse(self.check(event,at=NOW+timedelta(minutes=31)))
         self.assertFalse(self.check(dict(event,total_amount=99)))
         self.assertFalse(self.check(event, uid=18))
         self.assertTrue(self.check(event))
         self.assertTrue(self.check(event))
         self.assertFalse(self.check(event,"different-query"))
-        self.assertFalse(self.check(self.invoice("PLUS"),"another"))
+        self.assertFalse(self.check(other,"another"))
 
     def test_disabled_sales_decline_checkout_and_issue_no_invoice(self):
         event = self.invoice()
@@ -96,3 +97,52 @@ class StarsPayments(TestCase):
         self.telegram.call.assert_not_called()
         self.update(message("/terms", chat=self.uid))
         self.assertEqual(self.telegram.sent[-1][2][0][0]["url"], self.cfg.stars_terms)
+
+    def test_refund_before_receipt_preserves_both_events_without_grant(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        self.receipt(event,"refunded_payment")
+        self.receipt(event)
+        self.receipt(event)
+        self.assertEqual(entitlement(self.store.db,self.uid,self.stamp),("FREE",None))
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM star_terms").fetchone()[0],1)
+        self.assertEqual(self.store.db.execute("SELECT count(*) FROM star_refunds").fetchone()[0],1)
+        self.assertFalse(self.telegram.sent)
+
+    def test_checkout_replay_after_expiry_declined(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        self.assertFalse(self.check(event,at=NOW+timedelta(minutes=31)))
+
+    def test_all_paid_prices_and_switch_after_expiry(self):
+        at = NOW
+        for plan,price in (("PLUS",99),("PRO",199),("ULTRA",399)):
+            event = self.invoice(plan, at)
+            self.assertEqual(event["total_amount"],price)
+            self.assertTrue(self.check(event,query=plan,at=at))
+            self.receipt(event,charge=plan)
+            self.assertEqual(entitlement(self.store.db,self.uid,self.stamp),(plan,self.stamp+MONTH))
+            self.stamp += MONTH
+            self.assertEqual(entitlement(self.store.db,self.uid,self.stamp),("FREE",None))
+            at += timedelta(seconds=MONTH)
+
+    def test_waiting_checkout_visible_only_to_buyer_and_blocks_extra_invoice(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        self.telegram.call.reset_mock()
+        self.update(callback("buy:PLUS",chat=self.uid))
+        self.telegram.call.assert_not_called()
+        self.update(message("/subscription",chat=self.uid))
+        self.assertIn("Ожидается подтверждение оплаты тарифа PRO", self.telegram.sent[-1][1])
+        self.update(message("/subscription",chat=self.uid+1))
+        self.assertNotIn("Ожидается подтверждение", self.telegram.sent[-1][1])
+        self.receipt(event)
+        self.update(message("/subscription",chat=self.uid))
+        self.assertNotIn("Ожидается подтверждение", self.telegram.sent[-1][1])
+
+    def test_buy_command_opens_terms_without_charge(self):
+        self.update(message("/buy plus", chat=self.uid))
+        text, keyboard = self.telegram.sent[-1][1:]
+        self.assertIn("99", text)
+        self.assertEqual(keyboard[1][0]["callback_data"], "buy:PLUS")
+        self.telegram.call.assert_not_called()

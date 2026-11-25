@@ -11,7 +11,7 @@ from typing import Any
 from . import __version__
 from .service import effective_access, prefs, threshold, view, SUB
 from .subscriptions import PLANS
-from .payments import answer_checkout, create_invoice, settle_receipt
+from .payments import answer_checkout, create_invoice, settle_receipt, pending_message, pending_plan
 from .config import Settings
 from .floors import floor_status
 from .storage import Storage
@@ -22,6 +22,7 @@ OWNER = "owner"
 DISCOUNT_CHOICES = (30, 40, 50)
 COMMAND_HINTS = {
     "start": "Включить уведомления и открыть меню",
+    "buy": "Выбрать тариф за Stars",
     "subscription": "Посмотреть тариф и условия подписок",
     "prices": "Открыть каталог цен",
     "gift": "Посмотреть карточку коллекции",
@@ -262,8 +263,12 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
                 if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
         tg.send(chat, text)
         return
+    if command == "/buy":
+        command = "/subscription"
     if command in SERVICE or command == "/prices":
         args = str(msg.get("text", "")).partition(" ")[2].strip()[:150]
+        if command == "/subscription" and args.upper() in PLANS:
+            args = args.upper()
         text, kb = view(cfg, store, tg, chat, key, command, args, now)
         tg.send(chat, text, kb)
         return
@@ -287,6 +292,8 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
         elif (chat == cfg.owner_chat_id and cfg.owner_lifetime_ultra
               or effective_access(cfg, store, chat, int(now.timestamp()))[0] != "FREE"):
             tg.send(chat, "У вас уже есть доступ. Тариф можно выбрать после окончания текущего периода.")
+        elif waiting := pending_plan(store.db, chat):
+            tg.send(chat, pending_message(waiting))
         else:
             create_invoice(store.db, tg, chat, plan, int(now.timestamp()))
         return
