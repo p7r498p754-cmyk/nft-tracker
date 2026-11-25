@@ -14,7 +14,7 @@ from nft_tracker.valuation import MarketEvent
 
 NOW = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
 OWNER = 777
-LINK_TEMPLATE = "https://t.me/test_bot/app?startapp=item_{id}"  # fictional, tests only
+LINK_TEMPLATE = "https://t.me/portals/app?startapp=item_{id}"  # fictional, tests only
 
 
 def make_settings(**kw) -> Settings:

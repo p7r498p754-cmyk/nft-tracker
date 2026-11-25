@@ -3,6 +3,7 @@ or taken from an API field; nothing is guessed."""
 from __future__ import annotations
 
 import ipaddress
+import re
 import urllib.parse
 from typing import Any
 
@@ -37,6 +38,13 @@ def safe_link(raw: Any) -> str | None:
         return None
     if not p.path or p.path == "/":
         return None
+    if p.hostname.lower() in {"t.me", "telegram.me"}:
+        if not re.fullmatch(r"/portals(?:/[A-Za-z0-9_]+)?", p.path, re.IGNORECASE):
+            return None
+        params = urllib.parse.parse_qs(p.query, keep_blank_values=True)
+        starts = params.get("startapp", [])
+        if len(starts) != 1 or not starts[0]:
+            return None
     return raw
 
 

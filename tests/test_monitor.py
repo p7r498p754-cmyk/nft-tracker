@@ -10,7 +10,7 @@ from nft_tracker.telegram import TelegramError, format_alert, fmt_price
 from nft_tracker.valuation import evaluate
 from tests.helpers import LINK_TEMPLATE, NOW, OWNER, FakePortals, FakeTelegram, ev, make_settings, sales
 
-LINK = "https://t.me/test_bot/app?startapp=item_g1"
+LINK = "https://t.me/portals/app?startapp=item_g1"
 GOOD_SALES = sales(["100", "100", "100"])
 
 

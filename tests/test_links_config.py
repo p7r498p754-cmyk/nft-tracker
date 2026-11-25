@@ -15,16 +15,21 @@ class Links(unittest.TestCase):
                     "https://t.me:8443/x", "https://t.me/x#frag", None, 5, "", "https://t.me/" + "a" * 3000]:
             self.assertIsNone(links.safe_link(bad), bad)
 
+    def test_only_marketplace_telegram_links_for_listing_buttons(self):
+        for path in ("other_bot/app?startapp=gift", "portals", "portals/app?startapp=",
+                     "portals/app?startapp=one&startapp=two", "portals/../other?startapp=g"):
+            self.assertIsNone(links.safe_link("https://t.me/" + path))
+
     def test_good_link(self):
-        self.assertEqual(links.safe_link("https://t.me/bot/app?startapp=1"), "https://t.me/bot/app?startapp=1")
+        self.assertEqual(links.safe_link("https://t.me/portals/app?startapp=1"), "https://t.me/portals/app?startapp=1")
 
     def test_template_builds_and_quotes_id(self):
-        out = links.build_listing_link("https://t.me/b/a?startapp=x_{id}", "a b/../c")
-        self.assertEqual(out, "https://t.me/b/a?startapp=x_a%20b%2F..%2Fc")
+        out = links.build_listing_link("https://t.me/portals/a?startapp=x_{id}", "a b/../c")
+        self.assertEqual(out, "https://t.me/portals/a?startapp=x_a%20b%2F..%2Fc")
 
     def test_template_validation(self):
-        links.validate_template("https://t.me/b/a?startapp=x_{id}")
-        for bad in ["https://t.me/b/a", "https://t.me/b/{id}/{id}", "https://evil.com/{id}", "http://t.me/b/{id}",
+        links.validate_template("https://t.me/portals/a?startapp=x_{id}")
+        for bad in ["https://t.me/portals/a", "https://t.me/b/{id}/{id}", "https://evil.com/{id}", "http://t.me/b/{id}",
                     "https://t.me/{id}"[:0] + "https://t.me/"]:
             with self.assertRaises(ConfigError):
                 links.validate_template(bad)
