@@ -178,7 +178,10 @@ async function testBotUpdate(env, update, now, send) {
         return;
     }
     if (m.from?.id !== uid || typeof m.text !== "string") return;
-    const [raw, requested] = m.text.trim().split(/\s+/, 2);
+    const labels = Object.entries(PRICES).map(([name, amount]) => `${name} · ${amount} ⭐`);
+    const choice = labels.indexOf(m.text.trim());
+    const input = choice < 0 ? m.text.trim() : "/buy " + Object.keys(PRICES)[choice];
+    const [raw, requested] = input.split(/\s+/, 2);
     const command = raw.split("@", 1)[0].toLowerCase();
     if (command === "/buy" && Object.hasOwn(PRICES, requested?.toUpperCase())) {
         const plan = requested.toUpperCase();
@@ -199,7 +202,9 @@ async function testBotUpdate(env, update, now, send) {
     const text = ordinaryPreview(env)
         ? "NFT Tracker · демо без списаний. Для просмотра счёта отправьте /buy PLUS, /buy PRO или /buy ULTRA."
         : `NFT Tracker · тестовая среда. Ваш тариф: ${await currentPlan(env.LEDGER, uid, now)}.\nПроверка оплаты: /buy PLUS, /buy PRO или /buy ULTRA.\nПосле оплаты: /subscription.`;
-    await call("sendMessage", { chat_id: uid, text });
+    await call("sendMessage", { chat_id: uid, text, reply_markup: {
+        keyboard: [labels.map(label => ({ text: label }))], resize_keyboard: true, one_time_keyboard: true
+    } });
 }
 
 export async function handle(request, env, compare = crypto.subtle.timingSafeEqual.bind(crypto.subtle), send = fetch) {

@@ -68,13 +68,14 @@ test("staging webhook validates order, persists one receipt, and revokes refunde
     const telegramEnv = { ...env, STAGING_FIXTURES: "0", TELEGRAM_TEST_BOT_TOKEN: "12345:test-token",
         TELEGRAM_TEST_BOT_USERNAME: "nfttracker_app", STAGING_WEBHOOK_URL: "https://preview.example/telegram" };
     let webhook = "";
-    let invoice;
+    let invoice, menu;
     const fakeApi = async (url, options) => {
         assert.match(url, /^https:\/\/api\.telegram\.org\/bot[0-9]+:[^/]+\/test\//);
         const method = url.split("/").at(-1);
         const payload = JSON.parse(options.body);
         apiMethods.push(method);
         if (method === "setWebhook") webhook = payload.url;
+        if (method === "sendMessage") menu = payload;
         if (method === "sendInvoice") invoice = payload;
         return Response.json({ ok: true, result: method === "getMe" ? { username: "nfttracker_app" } :
             method === "getWebhookInfo" ? { url: webhook } : true });
@@ -83,10 +84,15 @@ test("staging webhook validates order, persists one receipt, and revokes refunde
     assert.deepEqual(apiMethods, ["getMe"]);
     assert.equal(await connectTestBot(telegramEnv, fakeApi), "ready");
     assert.equal(webhook, telegramEnv.STAGING_WEBHOOK_URL);
-    const response = await handle(new Request("https://preview.example/telegram", {
+    const deliverText = text => handle(new Request("https://preview.example/telegram", {
         method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": env.STAGING_WEBHOOK_SECRET },
-        body: JSON.stringify({ message: { chat: { type: "private", id: 18 }, from: { id: 18 }, text: "/buy PLUS" } }),
+        body: JSON.stringify({ message: { chat: { type: "private", id: 18 }, from: { id: 18 }, text } }),
     }), telegramEnv, compare, fakeApi);
+    assert.equal((await deliverText("/buy")).status, 204);
+    assert.equal(invoice, undefined);
+    const buttons = menu.reply_markup.keyboard.flat().map(button => button.text);
+    assert.deepEqual(buttons, ["PLUS · 99 ⭐","PRO · 199 ⭐","ULTRA · 399 ⭐"]);
+    const response = await deliverText(buttons[0]);
     assert.equal(response.status, 204);
     assert.equal(invoice.currency, "XTR");
     assert.equal(invoice.prices[0].amount, 99);
