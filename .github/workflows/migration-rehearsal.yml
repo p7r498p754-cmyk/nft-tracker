@@ -1,0 +1,26 @@
+name: Private database migration rehearsal
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/migration-rehearsal.yml'
+      - 'nft_tracker/migration_check.py'
+      - 'nft_tracker/storage.py'
+      - 'nft_tracker/backup.py'
+permissions:
+  contents: read
+jobs:
+  rehearsal:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'beta-0.7.0' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/cache/restore@v4
+        with:
+          path: state
+          key: migration-readonly-${{ github.run_id }}
+          restore-keys: nft-state-
+      - name: Rehearse using temporary copies
+        run: python3 -m nft_tracker.migration_check state/tracker.sqlite3
