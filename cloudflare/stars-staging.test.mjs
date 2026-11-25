@@ -115,5 +115,19 @@ test("staging webhook validates order, persists one receipt, and revokes refunde
     assert.equal((await deliverPreview({ message: { chat: { type: "private", id: 18 }, from: { id: 18 }, date: stamp,
         successful_payment: { ...payment, telegram_payment_charge_id: "ordinary-charge" } } })).status, 204);
     assert.equal(sqlite.prepare("SELECT charge_id FROM orders WHERE payload=?").get(invoice.payload).charge_id, null);
+    const deliverTest = body => handle(new Request("https://preview.example/telegram", {
+        method:"POST", headers:{"X-Telegram-Bot-Api-Secret-Token":env.STAGING_WEBHOOK_SECRET},
+        body:JSON.stringify(body)
+    }), telegramEnv, compare, fakeApi);
+    await deliverTest({pre_checkout_query:{...payment,id:"test-check",from:{id:18}}});
+    for (const field of ["successful_payment","refunded_payment"]) {
+        const before = apiMethods.filter(method => method === "sendMessage").length;
+        const update = {message:{chat:{type:"private",id:18},from:{id:18},date:stamp,
+            [field]:{...payment,telegram_payment_charge_id:"test-charge-18"}}};
+        await deliverTest(update);
+        await deliverTest(update);
+        assert.equal(apiMethods.filter(method => method === "sendMessage").length,before+1);
+        assert.match(menu.text,field === "successful_payment" ? /PLUS/ : /FREE/);
+    }
     sqlite.close();
 });

@@ -55,7 +55,7 @@ async function checkout(db, query, now) {
     const { results } = await db.prepare(`
         UPDATE OR IGNORE orders SET checkout_id=?1
         WHERE payload=?2 AND user_id=?3 AND stars=?4 AND charge_id IS NULL
-          AND (checkout_id=?1 OR (checkout_id IS NULL AND expires_at>?5
+          AND expires_at>?5 AND (checkout_id=?1 OR (checkout_id IS NULL
               AND NOT EXISTS (SELECT 1 FROM orders existing
                   WHERE existing.user_id=?3 AND existing.refunded=0
                     AND existing.paid_at>?6)))
@@ -174,7 +174,11 @@ async function testBotUpdate(env, update, now, send) {
     if (m?.chat?.type !== "private" || !validId(uid)) return;
     if (m.successful_payment || m.refunded_payment) {
         // The ledger itself is the source of truth, so replay cannot send another message or grant.
-        if (!ordinaryPreview(env)) await settle(env.LEDGER, m, now);
+        if (!ordinaryPreview(env) && (await settle(env.LEDGER, m, now)).recorded) {
+            const text = m.refunded_payment ? "Возврат тестовой оплаты подтверждён."
+                : "Тестовая оплата подтверждена. Срок доступа — 30 дней.";
+            await call("sendMessage", {chat_id: uid, text: text + " Ваш тариф: " + await currentPlan(env.LEDGER, uid, now) + "."});
+        }
         return;
     }
     if (m.from?.id !== uid || typeof m.text !== "string") return;
