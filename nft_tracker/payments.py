@@ -49,10 +49,10 @@ def reserve_checkout(db, uid, query, now):
         if order is None or not isinstance(query_id, str) or not query_id or order[3] is not None:
             return False
         _, expires, existing_query, _ = order
-        if existing_query is not None:
-            return existing_query == query_id
         if expires <= now or entitlement(db, uid, now)[0] != "FREE":
             return False
+        if existing_query is not None:
+            return existing_query == query_id
         outstanding = db.execute("""SELECT 1 FROM star_checkouts c JOIN star_orders o USING(payload)
             WHERE o.uid=? AND c.query_id IS NOT NULL AND c.completed_charge IS NULL""", (uid,)).fetchone()
         if outstanding or db.execute("SELECT 1 FROM star_checkouts WHERE query_id=?", (query_id,)).fetchone():
@@ -97,11 +97,13 @@ def settle_receipt(db, uid, event, paid_at, *, refund=False):
         if refund:
             db.execute("INSERT OR IGNORE INTO star_refunds VALUES (?,?)", (charge, payload))
             return None
-        if completed is not None or event.get("is_recurring") or event.get("subscription_expiration_date"):
-            if completed is None:
-                raise ValueError("Unexpected recurring payment")
+        if event.get("is_recurring") or event.get("subscription_expiration_date"):
+            raise ValueError("Unexpected recurring payment")
+        if db.execute("SELECT 1 FROM star_terms WHERE charge=?", (charge,)).fetchone():
             return None
         if type(paid_at) is not int or not 0 < paid_at <= 253402300799 - MONTH:
             raise ValueError("Invalid payment date")
         db.execute("INSERT INTO star_terms VALUES (?,?,?,?)", (charge, payload, paid_at, paid_at + MONTH))
+        if db.execute("SELECT 1 FROM star_refunds WHERE charge=?", (charge,)).fetchone():
+            return None
         return plan
