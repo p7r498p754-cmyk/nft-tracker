@@ -141,7 +141,7 @@ export async function connectTestBot(env, send = fetch) {
             if (error.status === 401 || error.status === 404) return "invalid_test_token";
             throw error;
         }
-        if (bot.username?.toLowerCase() !== env.TELEGRAM_TEST_BOT_USERNAME) return "wrong_test_bot";
+        if (!bot.is_bot && env.TEST_DC || (env.TEST_DC ? !["nfttrecker_test_bot","nfttrecker_beta_test_bot"].includes(bot.username?.toLowerCase()) : bot.username?.toLowerCase() !== env.TELEGRAM_TEST_BOT_USERNAME)) return "wrong_test_bot";
         const existing = await telegram(env, "getWebhookInfo", {}, send);
         if (existing.url && existing.url !== env.STAGING_WEBHOOK_URL) return "other_webhook";
         if (await telegram(env, "setWebhook", {
@@ -261,9 +261,21 @@ export async function handle(request, env, compare = crypto.subtle.timingSafeEqu
     }
 }
 
+function testEnvironment(env) {
+    return {LEDGER: env.TEST_LEDGER, TELEGRAM_TEST_BOT_TOKEN: env.TEST_TELEGRAM_BOT_TOKEN,
+        STAGING_WEBHOOK_SECRET: env.TEST_DC_SECRET, STAGING_SETUP_SECRET: env.TEST_SETUP_SECRET,
+        STAGING_WEBHOOK_URL: env.STAGING_WEBHOOK_URL.replace(/\/telegram$/, "/test/telegram"), TEST_DC: true};
+}
+
 export default {
-    fetch: (request, env) => handle(request, env),
+    fetch(request, env) {
+        const url = new URL(request.url);
+        if (!url.pathname.startsWith("/test/")) return handle(request,env);
+        url.pathname = url.pathname.slice(5);
+        return handle(new Request(url,request), testEnvironment(env));
+    },
     async scheduled(event, env) {
+        if (env.TEST_LEDGER) await connectTestBot(testEnvironment(env));
         const status = await connectTestBot(env);
         if (status !== "ready" && status !== "waiting_for_token") {
             console.warn(JSON.stringify({ event: "test_bot_setup", status }));
