@@ -204,3 +204,19 @@ class StarsPayments(TestCase):
             handle_update(self.cfg, with_store, self.telegram, message(command,chat=self.uid), NOW)
             self.assertIn(expected,self.telegram.sent[-1][1])
         self.assertTrue(with_store.user(str(self.uid)).active)
+
+    def test_refund_requires_owner_action_and_replayed_click_cannot_spend_twice(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        self.receipt(event)
+        self.telegram.call.reset_mock()
+        self.update(message("/admin refund 1",chat=self.cfg.owner_chat_id))
+        self.assertIn("Вернуть",self.telegram.sent[-1][1])
+        confirm = self.telegram.sent[-1][2][0][0]["callback_data"]
+        self.update(callback(confirm,chat=self.uid))
+        self.telegram.call.assert_not_called()
+        self.update(callback(confirm,chat=self.cfg.owner_chat_id))
+        self.update(callback(confirm,chat=self.cfg.owner_chat_id))
+        self.telegram.call.assert_called_once_with("refundStarPayment",
+            {"user_id":self.uid,"telegram_payment_charge_id":"fixture-charge"},timeout=5)
+        self.assertEqual(entitlement(self.store.db,self.uid,self.stamp),("FREE",None))

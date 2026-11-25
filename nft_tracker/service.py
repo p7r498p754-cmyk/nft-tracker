@@ -9,7 +9,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
-from .payments import pending_plan, pending_message
+from .payments import owner_refund, pending_plan, pending_message
 from .beta import MINUTES
 from .catalog import CURRENCIES, catalog_page, visible_catalog
 from .storage import Storage
@@ -122,7 +122,7 @@ def admin(cfg, store, tg, uid, action, now):
             return "Проверка тестовых тарифов отключена при продаже подписок.", keyboard
     action = action.strip() or "menu"
     label = action.split()[0]
-    if label not in ("menu","users","income","monitor","config","limit","reports","threshold","preview"):
+    if label not in ("menu","users","income","monitor","config","limit","reports","threshold","preview","refund"):
         label = "unknown"
     with store.db:
         store.db.execute("INSERT INTO audit(at,action) VALUES (?,?)", (int(now.timestamp()), "admin:"+label))
@@ -136,6 +136,8 @@ def admin(cfg, store, tg, uid, action, now):
             trial = {} if name == "FREE" else {"plan": name, "end": int(now.timestamp()) + 86400}
             store.set("owner_plan_preview", json.dumps(trial))
             return menu(store, *effective_access(cfg, store, uid, int(now.timestamp())))
+    if action.startswith("refund "):
+        return owner_refund(cfg, store, tg, uid, action.split(maxsplit=1)[1], int(now.timestamp()))
     if action == "users":
         names = Counter(entitlement(store.db, u or uid, int(now.timestamp()))[0] for u, in store.db.execute("SELECT chat_id FROM users"))
         return f"Пользователей: {sum(names.values())} · с активным платным доступом: {sum(names.values())-names['FREE']}\n" + " · ".join(f"{n}: {names[n]}" for n in PLANS), keyboard
@@ -227,14 +229,14 @@ def view(cfg, store, tg, uid, key, command, args, now):
     if command == "/admin":
         return admin(cfg, store, tg, uid, args or "menu", now)
     if command == "/payments":
-        rows = store.db.execute("""SELECT o.plan,o.amount,t.starts,r.charge IS NOT NULL
+        rows = store.db.execute("""SELECT t.rowid,o.plan,o.amount,t.starts,r.charge IS NOT NULL
             FROM star_orders o JOIN star_terms t USING(payload) JOIN star_checkouts c USING(payload)
             LEFT JOIN star_refunds r ON r.charge=t.charge WHERE o.uid=? AND c.completed_charge=t.charge
             ORDER BY t.starts DESC,t.rowid DESC LIMIT 10""", (uid,)).fetchall()
         lines = ["Ваши последние подтверждённые платежи:"]
-        for tier, amount, stamp, refunded in rows:
+        for number, tier, amount, stamp, refunded in rows:
             date = datetime.fromtimestamp(stamp, timezone.utc).strftime("%d.%m.%Y")
-            lines.append(f"{date} · {tier} · {amount} ⭐ · " + ("возврат" if refunded else "оплачено"))
+            lines.append(f"№{number} · {date} · {tier} · {amount} ⭐ · " + ("возврат" if refunded else "оплачено"))
         return ("\n".join(lines) if rows else "Подтверждённых платежей пока нет."), SUB
     if command == "/subscription":
         waiting = pending_plan(store.db, uid)

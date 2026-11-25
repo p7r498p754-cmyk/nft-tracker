@@ -11,7 +11,7 @@ from typing import Any
 from . import __version__, beta
 from .service import effective_access, prefs, threshold, view, SUB
 from .subscriptions import PLANS
-from .payments import answer_checkout, create_invoice, settle_receipt, pending_message, pending_plan
+from .payments import owner_refund, answer_checkout, create_invoice, settle_receipt, pending_message, pending_plan
 from .config import Settings
 from .floors import floor_status
 from .storage import Storage
@@ -334,6 +334,10 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
                  data: str, now: datetime) -> None:
     key = OWNER if chat == cfg.owner_chat_id else str(chat)
     uid = chat
+    if data.startswith("refund:"):
+        text, kb = owner_refund(cfg,store,tg,chat,data.removeprefix("refund:"),int(now.timestamp()),confirm=True)
+        _reply(tg, chat, text, kb, edit_id)
+        return
     if data.startswith("buy:"):
         plan = data.removeprefix("buy:")
         if not cfg.stars_payments or not cfg.public_users or cfg.on_actions or plan not in PLANS or not PLANS[plan].price:
