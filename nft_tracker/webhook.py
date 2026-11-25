@@ -12,8 +12,17 @@ from .telegram import TelegramClient
 
 
 def create_app(cfg, secret, telegram):
-    if not secret or len(secret) < 32 or cfg.on_actions:
+    if not secret or len(secret) < 32 or cfg.on_actions or str(cfg.db_path) == ":memory:":
         raise ValueError("Webhook requires a private host and a separate secret.")
+    # Prepare the time index before accepting traffic, including on databases from older builds.
+    store = Storage(cfg.db_path)
+    try:
+        store.db.executescript("""
+            CREATE TABLE IF NOT EXISTS webhook_seen(id INTEGER PRIMARY KEY,at INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS webhook_seen_at ON webhook_seen(at);
+        """)
+    finally:
+        store.close()
     lock = Lock()
 
     def app(env, respond):
@@ -39,8 +48,6 @@ def create_app(cfg, secret, telegram):
         with lock:
             store = Storage(cfg.db_path)
             try:
-                with store.db:
-                    store.db.execute("CREATE TABLE IF NOT EXISTS webhook_seen(id INTEGER PRIMARY KEY,at INTEGER NOT NULL)")
                 if not store.db.execute("SELECT 1 FROM webhook_seen WHERE id=?", (update["update_id"],)).fetchone():
                     now = utcnow()
                     handle_update(cfg, store, telegram, update, now)
