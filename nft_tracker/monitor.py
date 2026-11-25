@@ -172,7 +172,6 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
             if link is None and not cfg.allow_no_link_alerts:
                 rep.skipped_no_link += 1
                 no_link_hits += 1
-                retry_needed = True
                 continue
             pending.append((sig, user, link))
             check_events[(ev.gift_id, ev.price)] = ev
@@ -236,7 +235,7 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         with store.db:
             store.db.executemany("INSERT OR REPLACE INTO beta_ticks VALUES (?,?)",
                                  [(u.user_key, int(now.timestamp())) for u in users if store.user(u.user_key)])
-    if complete and not retry_needed and checkpoint is not None and checkpoint >= since:
+    if complete and not retry_needed and not no_link_hits and checkpoint is not None and checkpoint >= since:
         store.set("last_listing_at", iso(checkpoint))
 
     if no_link_hits:
