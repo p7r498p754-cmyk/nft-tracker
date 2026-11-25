@@ -54,3 +54,20 @@ class ClosedBeta(unittest.TestCase):
             self.assertEqual(beta.feed(store,[],NOW),[ev()])
             with self.assertRaises(FileExistsError):
                 snapshot(backup,restored)
+
+    def test_read_only_health_uses_recorded_cycle_and_never_creates_database(self):
+        import json
+        import sqlite3
+        from datetime import timedelta
+        from nft_tracker.health import check
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "state.db"
+            with self.assertRaises(sqlite3.OperationalError):
+                check(path, 60, NOW)
+            self.assertFalse(path.exists())
+            store = Storage(path)
+            self.addCleanup(store.close)
+            self.assertEqual(check(path,60,NOW),"market_unavailable")
+            store.set("cycle",json.dumps({"ok_at":NOW.isoformat()}))
+            self.assertEqual(check(path,60,NOW),"ok")
+            self.assertEqual(check(path,60,NOW+timedelta(minutes=5)),"market_stale")

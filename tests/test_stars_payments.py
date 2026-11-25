@@ -185,3 +185,22 @@ class StarsPayments(TestCase):
         self.assertIn("Ваш тариф: <b>FREE</b>", self.telegram.sent[-1][1])
         self.update(message("/admin preview ULTRA", chat=self.cfg.owner_chat_id))
         self.assertIn("отключена", self.telegram.sent[-1][1])
+
+    def test_restore_paid_customer_from_private_backup(self):
+        from nft_tracker.backup import snapshot
+        self.update(message("/start", chat=self.uid))
+        self.assertIn("FREE", self.telegram.sent[-1][1] + str(entitlement(self.store.db,self.uid,self.stamp)))
+        event = self.invoice("PLUS")
+        self.assertTrue(self.check(event))
+        self.receipt(event)
+        path = Path(self.store.db.execute("PRAGMA database_list").fetchone()[2])
+        backup = path.with_name("backup.db")
+        restored = path.with_name("restored.db")
+        snapshot(path, backup)
+        snapshot(backup, restored)
+        with_store = Storage(restored)
+        self.addCleanup(with_store.close)
+        for command, expected in [("/subscription", "PLUS"), ("/payments","99 ⭐ · оплачено"), ("/summary","С начала суток")]:
+            handle_update(self.cfg, with_store, self.telegram, message(command,chat=self.uid), NOW)
+            self.assertIn(expected,self.telegram.sent[-1][1])
+        self.assertTrue(with_store.user(str(self.uid)).active)
