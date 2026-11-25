@@ -11,7 +11,7 @@ from decimal import Decimal, InvalidOperation
 
 from .payments import pending_plan, pending_message
 from .beta import MINUTES
-from .catalog import CURRENCIES, catalog_page
+from .catalog import CURRENCIES, catalog_page, visible_catalog
 from .storage import Storage
 from .subscriptions import PLANS, entitlement
 from .telegram import TelegramError
@@ -250,14 +250,15 @@ def view(cfg, store, tg, uid, key, command, args, now):
     if command == "/report" and store.get("reports_enabled", "1") != "1":
         return "Владелец временно отключил экспериментальный отчёт.", SUB
     if command == "/gift":
-        snap = store.get_json("price_catalog")
-        rows = snap.get("rows", [])
-        visible = rows if plan.level else rows[:5]
-        row = next((r for r in visible if r["name"].casefold()==args.casefold()), None)
+        snap, fallback = visible_catalog(store, full=plan.level >= 1)
+        row = next((r for r in snap.get("rows", []) if r["name"].casefold()==args.casefold()), None)
         if not row:
+            if plan.level:
+                return ("Полный снимок временно недоступен. Доступные коллекции — /prices." if fallback or not snap
+                        else "Коллекция не найдена. Проверьте название в /prices."), SUB
             return "Укажите доступную коллекцию из /prices. Полный каталог доступен с PLUS.", SUB
         lines = [html.escape(row["name"]), "Снимок StarPrice: " + snap["at"][:10],
-                 "Ориентиры: " + ", ".join(f"{m} {p} {CURRENCIES[m]}" for m,p in row["prices"].items())]
+                 "Ориентиры: " + (", ".join(f"{m} {p} {CURRENCIES[m]}" for m,p in row["prices"].items()) or "нет данных")]
         if (now - datetime.fromisoformat(snap["at"])).days >= 5:
             lines.append("Снимок устарел.")
         sale = store.db.execute("SELECT model,backdrop,symbol,price,event_time FROM sales WHERE name=? ORDER BY event_time DESC LIMIT 1",

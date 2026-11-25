@@ -88,25 +88,34 @@ def refresh_catalog_if_due(store, now):
             raise
 
 
-def catalog_page(store, now, page=1, query="", *, full=False, market=""):
+def visible_catalog(store, full):
     data = store.get_json("price_catalog")
-    if not full:
-        preview = store.get_json("catalog_preview")
-        if preview and (not data or parse_date(preview["at"]) > parse_date(data["at"])):
-            data = preview
+    if full and data:
+        return data, False
+    preview = store.get_json("catalog_preview")
+    if preview and (not data or parse_date(preview["at"]) > parse_date(data["at"])):
+        return {**preview, "rows": preview["rows"][:5]}, True
+    if data:
+        data = {**data, "rows": data["rows"][:5]}
+    return data, False
+
+
+def catalog_page(store, now, page=1, query="", *, full=False, market=""):
+    data, fallback = visible_catalog(store, full)
     back = [{"text": "Меню", "callback_data": "menu:main"}]
     if not data:
         return ("Снимок цен пока недоступен. Откройте каталог позже командой /prices.",
                 [[{"text": "Все цены", "callback_data": "prices:1"}], back])
     at = parse_date(data["at"])
-    visible = data["rows"] if full else data["rows"][:5]
-    rows = [r for r in visible if query.casefold() in r["name"].casefold()]
+    rows = [r for r in data["rows"] if query.casefold() in r["name"].casefold()]
     if market in CURRENCIES:
         rows.sort(key=lambda r: Decimal(r["prices"].get(market, "Infinity")))
     pages = max(1, (len(rows) + PAGE_SIZE - 1) // PAGE_SIZE)
     page = max(1, min(page, pages))
     lines = [f"Минимальные цены коллекций · {at:%d.%m.%Y %H:%M} UTC",
              'Источник: <a href="https://starprice.net/gifts">StarPrice</a>. Ориентиры коллекций, без подтверждения отдельного лота.\nTelegram ⭐ · Fragment GRAM · Portals GRAM (в этом порядке). Прочерк — нет свежей цены.']
+    if full and fallback:
+        lines.append("Полный снимок временно недоступен. Показан резервный предпросмотр.")
     if now >= at + PERIOD:
         lines.append("Снимок старше 5 дней. Ожидается успешное обновление.")
     for row in rows[(page-1)*PAGE_SIZE:page*PAGE_SIZE]:

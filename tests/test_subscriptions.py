@@ -106,6 +106,18 @@ class SubscriptionTests(TestCase):
         self.assertIn("Gift14",self.send("/prices portals"))
         self.assertIn("Gift12",self.send("/gift Gift12"))
 
+    def test_fallback_list_and_detail_use_same_visible_collections(self):
+        rows = [dict(name=f"Gift{i}", prices={}) for i in range(6)]
+        self.store.set("catalog_preview", json.dumps(dict(at=NOW.isoformat(), rows=rows)))
+        self.assertIn("Gift4", self.send("/prices"))
+        self.assertIn("Gift4", self.send("/gift Gift4"))
+        self.assertIn("нет данных", self.send("/gift Gift4"))
+        self.assertNotIn("Gift5", self.send("/gift Gift5"))
+        grant(self.store, 17, "PLUS")
+        self.assertIn("резервный предпросмотр", self.send("/prices"))
+        self.assertIn("Gift4", self.send("/gift Gift4"))
+        self.assertIn("временно недоступен", self.send("/gift Missing"))
+
     def test_access_and_favorites(self):
         self.send("/start")
         self.assertIn("владельцу",self.send("/admin income"))
