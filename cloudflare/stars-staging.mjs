@@ -94,12 +94,15 @@ async function createOrder(db, uid, plan, now) {
     return { payload, amount };
 }
 
-async function currentPlan(db, uid, now) {
-    const row = await db.prepare(`
+async function activeTerm(db, uid, now) {
+    return db.prepare(`
         SELECT plan,paid_at FROM orders WHERE user_id=? AND refunded=0 AND paid_at>? AND paid_at<=?
         ORDER BY paid_at DESC LIMIT 1
     `).bind(uid, now - ACCESS_SECONDS, now).first();
-    return row?.plan ?? "FREE";
+}
+
+async function currentPlan(db, uid, now) {
+    return (await activeTerm(db, uid, now))?.plan ?? "FREE";
 }
 
 function ordinaryPreview(env) {
@@ -187,6 +190,25 @@ async function testBotUpdate(env, update, now, send) {
     const input = choice < 0 ? m.text.trim() : "/buy " + Object.keys(PRICES)[choice];
     const [raw, requested] = input.split(/\s+/, 2);
     const command = raw.split("@", 1)[0].toLowerCase();
+    if (!ordinaryPreview(env) && ["/buy", "/subscription"].includes(command)) {
+        const pending = await env.LEDGER.prepare(
+            "SELECT plan FROM orders WHERE user_id=? AND checkout_id IS NOT NULL AND charge_id IS NULL LIMIT 1"
+        ).bind(uid).first();
+        if (pending) {
+            await call("sendMessage", {chat_id:uid, text:"Telegram ещё не прислал квитанцию за " + pending.plan + ". Повторная оплата не нужна."});
+            return;
+        }
+        if (command === "/subscription") {
+            const active = await activeTerm(env.LEDGER, uid, now);
+            const open = active ? null : await env.LEDGER.prepare(
+                "SELECT plan,stars FROM orders WHERE user_id=? AND checkout_id IS NULL AND expires_at>? ORDER BY expires_at DESC,rowid DESC LIMIT 1"
+            ).bind(uid,now).first();
+            const text = active ? "Тариф " + active.plan + " до " + new Date((active.paid_at+ACCESS_SECONDS)*1000).toISOString().slice(0,16).replace("T"," ") + " UTC. Автопродление выключено."
+                : "Ваш тариф: FREE." + (open ? " Выставлен счёт: " + open.plan + " · " + open.stars + " ⭐. Подтверждения оплаты пока нет." : " Активных счетов нет.");
+            await call("sendMessage", {chat_id:uid,text});
+            return;
+        }
+    }
     if (command === "/buy" && Object.hasOwn(PRICES, requested?.toUpperCase())) {
         const plan = requested.toUpperCase();
         if (await currentPlan(env.LEDGER, uid, now) !== "FREE") {
