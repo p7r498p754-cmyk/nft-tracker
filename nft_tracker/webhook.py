@@ -56,3 +56,18 @@ def create_app(cfg, secret, telegram):
 def from_env():
     cfg = Settings.from_env(need_portals=False)
     return create_app(cfg, os.environ["TELEGRAM_WEBHOOK_SECRET"], TelegramClient(cfg.telegram_token))
+
+
+def test_from_env():
+    """Isolated WSGI factory for Telegram's test DC. Only TEST_* settings are used."""
+    env = {key[5:]: value for key, value in os.environ.items() if key.startswith("TEST_")}
+    if not env.get("DB_PATH") or env["DB_PATH"] == ":memory:":
+        raise ValueError("Set TEST_DB_PATH to a separate private database.")
+    if os.path.realpath(env["DB_PATH"]) == os.path.realpath(os.getenv("DB_PATH", "state/tracker.sqlite3")):
+        raise ValueError("Test and production databases must differ.")
+    cfg = Settings.from_env(env, need_portals=False)
+    client = TelegramClient(cfg.telegram_token, test_server=True)
+    identity = client.call("getMe", timeout=5)
+    if not isinstance(identity, dict) or identity.get("is_bot") is not True:
+        raise ValueError("Test Telegram bot identity unconfirmed.")
+    return create_app(cfg, env["TELEGRAM_WEBHOOK_SECRET"], client)
