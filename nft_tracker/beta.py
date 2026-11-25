@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS beta_invites(uid INTEGER PRIMARY KEY, plan TEXT NOT N
 CREATE TABLE IF NOT EXISTS beta_ticks(user_key TEXT PRIMARY KEY REFERENCES users ON DELETE CASCADE, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS beta_feed(id TEXT PRIMARY KEY, at REAL NOT NULL, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS beta_feedback(uid INTEGER PRIMARY KEY REFERENCES beta_invites ON DELETE CASCADE, text TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS public_rate(uid INTEGER PRIMARY KEY, bucket INTEGER NOT NULL, hits INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS public_rate_bucket ON public_rate(bucket);
 CREATE TABLE IF NOT EXISTS beta_rate(uid INTEGER PRIMARY KEY REFERENCES beta_invites ON DELETE CASCADE, bucket INTEGER, hits INTEGER);
 """
 
@@ -43,6 +45,16 @@ def admit_request(store, uid, stamp):
             hits=CASE WHEN bucket=excluded.bucket THEN hits+1 ELSE 1 END,bucket=excluded.bucket
             RETURNING hits""", (uid, stamp // 60)).fetchone()
     return row[0] <= 20
+
+
+def admit_public_request(store, uid, stamp):
+    bucket = stamp // 60
+    with store.db:
+        store.db.execute("DELETE FROM public_rate WHERE bucket<?", (bucket - 1,))
+        hits, = store.db.execute("""INSERT INTO public_rate VALUES (?,?,1) ON CONFLICT(uid) DO UPDATE SET
+            hits=CASE WHEN bucket=excluded.bucket THEN min(hits+1,21) ELSE 1 END,bucket=excluded.bucket
+            RETURNING hits""", (uid, bucket)).fetchone()
+    return hits <= 20
 
 
 def feed(store, events, cutoff):

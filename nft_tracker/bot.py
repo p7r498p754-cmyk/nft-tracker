@@ -38,6 +38,8 @@ COMMAND_HINTS = {
     "ping": "Проверить время ожидания команды",
     "stop": "Выключить уведомления",
     "help": "Открыть справку",
+    "privacy": "Как используются мои данные",
+    "payments": "Мои подтверждённые платежи",
     "terms": "Открыть условия оплаты",
     "paysupport": "Получить помощь по платежам",
     "id": "Узнать свой Telegram ID",
@@ -45,7 +47,7 @@ COMMAND_HINTS = {
     "admin": "Открыть панель владельца",
 }
 COMMANDS = {"/" + name for name in COMMAND_HINTS}
-SERVICE = {"/gift", "/subscription", "/admin", "/favorite", "/filter", "/summary", "/analytics", "/report", "/export", "/paysupport"}
+SERVICE = {"/payments", "/gift", "/subscription", "/admin", "/favorite", "/filter", "/summary", "/analytics", "/report", "/export", "/paysupport"}
 
 
 def register_commands(cfg: Settings, tg: TelegramClient) -> None:
@@ -216,6 +218,9 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         if cfg.closed_beta and chat != cfg.owner_chat_id and not beta.admit_request(store, chat, int(now.timestamp())):
             acknowledge()
             return
+        if cfg.public_users and chat != cfg.owner_chat_id and not beta.admit_public_request(store, chat, int(now.timestamp())):
+            acknowledge()
+            return
         # Clear the spinner while rendering the menu on the SQLite thread.
         with ThreadPoolExecutor(max_workers=1) as pool:
             pool.submit(acknowledge)
@@ -240,6 +245,8 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
                     tg.send(chat, f"Оплата подтверждена. Доступ {plan} на 30 дней. /subscription · /paysupport")
         return
     if msg.get("from") and msg["from"].get("id") != chat:
+        return
+    if cfg.public_users and chat != cfg.owner_chat_id and not beta.admit_public_request(store, chat, int(now.timestamp())):
         return
     command = str(msg.get("text") or "").split(" ")[0].split("@")[0].lower()
     if str(msg.get("text") or "").strip().casefold() == "start":
@@ -276,6 +283,13 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         return
     if command == "/id":
         tg.send(chat, f"Ваш Telegram ID: <code>{chat}</code>\nИспользуйте его только как секрет OWNER_CHAT_ID в настройках хостинга.")
+        return
+    if command == "/privacy":
+        tg.send(chat, "NFT Tracker хранит ваш Telegram ID, настройки, избранные коллекции и историю уведомлений "
+                "для доставки сигналов. Для подписки сохраняются тариф, срок, сумма и идентификаторы платежа и возврата. "
+                "Telegram обрабатывает оплату Stars. /delete удаляет настройки и историю доставки. "
+                "Записи о покупках сохраняются для восстановления доступа, сверки и возвратов. "
+                "Вопросы по данным и покупкам — /paysupport.")
         return
     if command == "/terms":
         terms = [[{"text": "Открыть условия покупки", "url": cfg.stars_terms}]] if cfg.stars_terms else None

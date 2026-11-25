@@ -27,7 +27,7 @@ DETAILS = {
 
 def effective_access(cfg, store, uid, now):
     if uid == cfg.owner_chat_id and uid > 0:
-        trial = store.get_json("owner_plan_preview")
+        trial = {} if cfg.stars_payments else store.get_json("owner_plan_preview")
         name, end = trial.get("plan"), trial.get("end")
         if name in PLANS and type(end) is int and end > now:
             return name, end, True
@@ -116,6 +116,10 @@ def admin(cfg, store, tg, uid, action, now):
         return "Раздел доступен владельцу.", None
     keyboard = [[{"text": label, "callback_data": "admin:" + cmd}] for cmd,label in (
         ("users","Пользователи"), ("income","Доход NFT Tracker"), ("monitor","Мониторинг"), ("config","Настройки"), ("preview","Проверить тариф"))]
+    if cfg.stars_payments:
+        keyboard = [row for row in keyboard if row[0]["callback_data"] != "admin:preview"]
+        if action.split()[:1] == ["preview"]:
+            return "Проверка тестовых тарифов отключена при продаже подписок.", keyboard
     action = action.strip() or "menu"
     label = action.split()[0]
     if label not in ("menu","users","income","monitor","config","limit","reports","threshold","preview"):
@@ -222,6 +226,16 @@ def view(cfg, store, tg, uid, key, command, args, now):
         return f"Эта функция доступна с {tier}. Ваш тариф — {name}.", SUB
     if command == "/admin":
         return admin(cfg, store, tg, uid, args or "menu", now)
+    if command == "/payments":
+        rows = store.db.execute("""SELECT o.plan,o.amount,t.starts,r.charge IS NOT NULL
+            FROM star_orders o JOIN star_terms t USING(payload) JOIN star_checkouts c USING(payload)
+            LEFT JOIN star_refunds r ON r.charge=t.charge WHERE o.uid=? AND c.completed_charge=t.charge
+            ORDER BY t.starts DESC,t.rowid DESC LIMIT 10""", (uid,)).fetchall()
+        lines = ["Ваши последние подтверждённые платежи:"]
+        for tier, amount, stamp, refunded in rows:
+            date = datetime.fromtimestamp(stamp, timezone.utc).strftime("%d.%m.%Y")
+            lines.append(f"{date} · {tier} · {amount} ⭐ · " + ("возврат" if refunded else "оплачено"))
+        return ("\n".join(lines) if rows else "Подтверждённых платежей пока нет."), SUB
     if command == "/subscription":
         waiting = pending_plan(store.db, uid)
         if waiting:

@@ -160,3 +160,28 @@ class StarsPayments(TestCase):
         self.assertIn("99", text)
         self.assertEqual(keyboard[1][0]["callback_data"], "buy:PLUS")
         self.telegram.call.assert_not_called()
+
+    def test_public_rate_limit_never_drops_paid_receipt(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        for _ in range(25):
+            self.update(message("/ping", chat=self.uid))
+        count = len(self.telegram.sent)
+        self.update(message("/ping", chat=self.uid))
+        self.assertEqual(len(self.telegram.sent), count)
+        self.receipt(event)
+        later = NOW + timedelta(minutes=1)
+        self.update(message("/payments", chat=self.uid), later)
+        self.assertIn("199 ⭐ · оплачено", self.telegram.sent[-1][1])
+        self.update(message("/payments", chat=self.uid+1), later)
+        self.assertIn("пока нет", self.telegram.sent[-1][1])
+        self.receipt(event, "refunded_payment")
+        self.update(message("/payments", chat=self.uid), later)
+        self.assertIn("199 ⭐ · возврат", self.telegram.sent[-1][1])
+
+    def test_paid_runtime_ignores_stored_owner_preview(self):
+        self.store.set("owner_plan_preview", '{"plan":"PRO","end":2147483647}')
+        self.update(message("/subscription", chat=self.cfg.owner_chat_id))
+        self.assertIn("Ваш тариф: <b>FREE</b>", self.telegram.sent[-1][1])
+        self.update(message("/admin preview ULTRA", chat=self.cfg.owner_chat_id))
+        self.assertIn("отключена", self.telegram.sent[-1][1])

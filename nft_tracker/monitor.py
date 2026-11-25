@@ -137,7 +137,7 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
     sales = store.sales()
     users = store.active_users()
     plans = {u.user_key: effective_access(cfg, store, u.chat_id or cfg.owner_chat_id, int(now.timestamp()))[0] for u in users}
-    if cfg.closed_beta:
+    if cfg.closed_beta or cfg.public_users:
         listings = beta.feed(store, [e for e in listings if e.event_time <= now], oldest_eligible)
         users = [u for u in users if beta.allowed(cfg, store, u.chat_id or cfg.owner_chat_id)
                  and beta.due(store, u, plans[u.user_key], int(now.timestamp()))]
@@ -232,7 +232,7 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         store.mark_sent(user.user_key, sid, now)
         rep.alerts += 1
 
-    if cfg.closed_beta and complete and not retry_needed:
+    if (cfg.closed_beta or cfg.public_users) and complete and not retry_needed:
         with store.db:
             store.db.executemany("INSERT OR REPLACE INTO beta_ticks VALUES (?,?)",
                                  [(u.user_key, int(now.timestamp())) for u in users if store.user(u.user_key)])
