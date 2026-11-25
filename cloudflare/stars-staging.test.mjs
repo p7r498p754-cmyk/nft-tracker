@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { checkDelivery, connectTestBot, handle } from "./stars-staging.mjs";
+import { checkTestHistory, checkDelivery, connectTestBot, handle } from "./stars-staging.mjs";
 
 test("staging webhook validates order, persists one receipt, and revokes refunded access", async () => {
     const sqlite = new DatabaseSync(":memory:");
@@ -94,6 +94,21 @@ test("staging webhook validates order, persists one receipt, and revokes refunde
         assert.equal((await check.json()).delivery.status, expected);
         assert.equal(check.status, expected === "configured" ? 200 : 503);
     }
+    const auditEnv = {...telegramEnv, TEST_DC:true};
+    const history = async url => {
+        assert.ok(url.endsWith("/test/getStarTransactions"));
+        return Response.json({ok:true,result:{transactions:[
+            {id:"charge",amount:199,source:{transaction_type:"invoice_payment",user:{id:17}}},
+            {id:"missed",amount:99,source:{transaction_type:"invoice_payment",user:{id:18}}},
+        ]}});
+    };
+    await checkTestHistory(auditEnv,history,stamp);
+    const stats = sqlite.prepare("SELECT * FROM test_history_check").get();
+    assert.equal(stats.status,"complete");
+    assert.equal(stats.missing_receipts,1);
+    assert.equal(stats.incoming_invoices,2);
+    await checkTestHistory(auditEnv,async () => { throw Error("offline"); },stamp+3601);
+    assert.equal(sqlite.prepare("SELECT status FROM test_history_check").get().status,"api_unavailable");
     const deliverText = text => handle(new Request("https://preview.example/telegram", {
         method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": env.STAGING_WEBHOOK_SECRET },
         body: JSON.stringify({ message: { chat: { type: "private", id: 18 }, from: { id: 18 }, text } }),

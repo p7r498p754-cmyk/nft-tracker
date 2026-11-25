@@ -22,3 +22,8 @@ CREATE TABLE IF NOT EXISTS delivery_health (
     mode TEXT PRIMARY KEY, checked_at INTEGER NOT NULL, status TEXT NOT NULL,
     pending INTEGER, last_error_at INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS test_history_check (
+    id INTEGER PRIMARY KEY CHECK(id=1), checked_at INTEGER NOT NULL, status TEXT NOT NULL,
+    transactions INTEGER, incoming_invoices INTEGER, missing_receipts INTEGER
+);

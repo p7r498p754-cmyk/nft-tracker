@@ -178,6 +178,33 @@ export async function checkDelivery(env, send = fetch, now = Math.floor(Date.now
         .bind(mode, now, status, pending, lastError).run();
 }
 
+export async function checkTestHistory(env, send = fetch, now = Math.floor(Date.now()/1000)) {
+    if (!env.TEST_DC || ordinaryPreview(env)) return;
+    const previous = await env.LEDGER.prepare("SELECT checked_at FROM test_history_check WHERE id=1").first();
+    if (previous && now - previous.checked_at < 3600) return;
+    let status = "api_unavailable", count = null, incoming = null, missing = null;
+    try {
+        const result = await telegram(env, "getStarTransactions", {offset:0, limit:100}, send);
+        if (!Array.isArray(result?.transactions)) throw new Error("invalid_history");
+        const charges = result.transactions.filter(t => t.source?.transaction_type === "invoice_payment");
+        const recorded = await env.LEDGER.prepare(
+            "SELECT charge_id,user_id,stars FROM orders WHERE paid_at IS NOT NULL AND charge_id IN (SELECT value FROM json_each(?))"
+        ).bind(JSON.stringify(charges.map(t => t.id))).all();
+        const receipts = new Map(recorded.results.map(row => [row.charge_id,row]));
+        missing = charges.filter(t => {
+            const receipt = receipts.get(t.id);
+            return !receipt || receipt.user_id !== t.source.user?.id || receipt.stars !== t.amount;
+        }).length;
+        count = result.transactions.length;
+        incoming = charges.length;
+        status = count === 100 ? "page_only" : "complete";
+    } catch {
+        // Store an unavailable observation separately from a successful empty response.
+    }
+    await env.LEDGER.prepare("INSERT OR REPLACE INTO test_history_check VALUES (1,?,?,?,?,?)")
+        .bind(now,status,count,incoming,missing).run();
+}
+
 async function testBotUpdate(env, update, now, send) {
     const call = (method, fields) => telegram(env, method, fields, send);
     if (update.pre_checkout_query) {
@@ -331,6 +358,7 @@ export default {
         await Promise.all(environments.map(async target => {
             await connectTestBot(target);
             await checkDelivery(target);
+            if (target.TEST_DC) await checkTestHistory(target);
         }));
     },
 };
