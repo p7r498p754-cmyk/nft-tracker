@@ -1,4 +1,4 @@
-"""CLI: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}"""
+"""CLI: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once|scan-once|scan-loop}"""
 from __future__ import annotations
 
 import logging
@@ -159,8 +159,8 @@ def run_loop(cfg, store, tg, portals, *, once=False):
 
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "run"
-    if cmd not in {"run", "loop", "diagnose", "commands", "register-commands", "serve-once"}:
-        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}")
+    if cmd not in {"run", "loop", "diagnose", "commands", "register-commands", "serve-once", "scan-once", "scan-loop"}:
+        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once|scan-once|scan-loop}")
         return 2
     try:
         cfg = Settings.from_env(need_portals=cmd not in {"commands", "register-commands"})
@@ -200,6 +200,13 @@ def main(argv: list[str]) -> int:
                 return 0 if ok else 1
         finally:
             store.close()
+    if cmd in {"scan-once", "scan-loop"}:
+        portals = None if cfg.setup_mode else PortalsClient(cfg.portals_key, link_template=cfg.listing_url_template,
+                                                            purchase_action=cfg.purchase_action)
+        try:
+            return 0 if market_worker(cfg, portals, Event(), once=cmd == "scan-once") else 1
+        except KeyboardInterrupt:
+            return 0
     store, tg, portals = _make(cfg)
     try:
         if cmd == "run":
