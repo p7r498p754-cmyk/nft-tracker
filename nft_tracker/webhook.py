@@ -46,7 +46,7 @@ def create_app(cfg, secret, telegram):
             return finish("400 Bad Request")
 
         with lock:
-            store = Storage(cfg.db_path)
+            store = Storage(cfg.db_path, initialized=True)
             try:
                 if not store.db.execute("SELECT 1 FROM webhook_seen WHERE id=?", (update["update_id"],)).fetchone():
                     now = utcnow()
@@ -62,7 +62,12 @@ def create_app(cfg, secret, telegram):
 
 def from_env():
     cfg = Settings.from_env(need_portals=False)
-    return create_app(cfg, os.environ["TELEGRAM_WEBHOOK_SECRET"], TelegramClient(cfg.telegram_token))
+    client = TelegramClient(cfg.telegram_token)
+    if cfg.stars_payments:
+        identity = client.call("getMe", timeout=5)
+        if not isinstance(identity, dict) or identity.get("is_bot") is not True or str(identity.get("username")).lower() != "nfttrecker_bot":
+            raise ValueError("Ожидался основной бот @nfttrecker_bot")
+    return create_app(cfg, os.environ["TELEGRAM_WEBHOOK_SECRET"], client)
 
 
 def test_from_env():
