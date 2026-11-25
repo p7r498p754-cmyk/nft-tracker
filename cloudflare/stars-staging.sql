@@ -17,3 +17,8 @@ CREATE TABLE IF NOT EXISTS staging_webhook_mode (
     mode TEXT PRIMARY KEY,
     status TEXT NOT NULL CHECK (status='ready')
 );
+
+CREATE TABLE IF NOT EXISTS delivery_health (
+    mode TEXT PRIMARY KEY, checked_at INTEGER NOT NULL, status TEXT NOT NULL,
+    pending INTEGER, last_error_at INTEGER
+);

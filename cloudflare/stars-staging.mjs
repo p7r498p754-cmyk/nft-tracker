@@ -160,6 +160,24 @@ export async function connectTestBot(env, send = fetch) {
     }
 }
 
+export async function checkDelivery(env, send = fetch, now = Math.floor(Date.now() / 1000)) {
+    const mode = ordinaryPreview(env) ? "ordinary-preview" : "test";
+    let status = "api_unavailable", pending = null, lastError = null;
+    try {
+        const info = await telegram(env, "getWebhookInfo", {}, send);
+        if (Number.isSafeInteger(info.pending_update_count)) pending = info.pending_update_count;
+        if (Number.isSafeInteger(info.last_error_date)) lastError = info.last_error_date;
+        if (info.url !== env.STAGING_WEBHOOK_URL) status = "webhook_mismatch";
+        else if (Array.isArray(info.allowed_updates) && info.allowed_updates.length &&
+                !["message", "pre_checkout_query"].every(type => info.allowed_updates.includes(type))) status = "updates_missing";
+        else status = "configured";
+    } catch {
+        // A failed API call is also a fresh diagnostic observation.
+    }
+    await env.LEDGER.prepare("INSERT OR REPLACE INTO delivery_health(mode,checked_at,status,pending,last_error_at) VALUES (?,?,?,?,?)")
+        .bind(mode, now, status, pending, lastError).run();
+}
+
 async function testBotUpdate(env, update, now, send) {
     const call = (method, fields) => telegram(env, method, fields, send);
     if (update.pre_checkout_query) {
@@ -240,8 +258,11 @@ export async function handle(request, env, compare = crypto.subtle.timingSafeEqu
         try {
             await db.prepare("SELECT payload FROM orders LIMIT 1").first();
             const mode = ordinaryPreview(env) ? "ordinary-preview" : "test";
-            const connection = await db.prepare("SELECT status FROM staging_webhook_mode WHERE mode=?").bind(mode).first();
-            return Response.json({ status: "ok", mode: "staging", telegram: connection?.status ?? "pending" });
+            const delivery = await db.prepare("SELECT checked_at,status,pending,last_error_at FROM delivery_health WHERE mode=?").bind(mode).first();
+            const fresh = delivery && Math.floor(Date.now()/1000) - delivery.checked_at < 1800;
+            const ok = fresh && delivery.status === "configured";
+            return Response.json({status:ok ? "ok" : "unavailable", mode:"staging", delivery:delivery ?? null},
+                {status:ok ? 200 : 503, headers:{"Cache-Control":"no-store"}});
         } catch {
             return Response.json({ status: "unavailable" }, { status: 503 });
         }
@@ -306,10 +327,10 @@ export default {
         return handle(new Request(url,request), testEnvironment(env));
     },
     async scheduled(event, env) {
-        if (env.TEST_LEDGER) await connectTestBot(testEnvironment(env));
-        const status = await connectTestBot(env);
-        if (status !== "ready" && status !== "waiting_for_token") {
-            console.warn(JSON.stringify({ event: "test_bot_setup", status }));
-        }
+        const environments = env.TEST_LEDGER ? [env, testEnvironment(env)] : [env];
+        await Promise.all(environments.map(async target => {
+            await connectTestBot(target);
+            await checkDelivery(target);
+        }));
     },
 };

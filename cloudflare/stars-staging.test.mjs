@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 
-import { connectTestBot, handle } from "./stars-staging.mjs";
+import { checkDelivery, connectTestBot, handle } from "./stars-staging.mjs";
 
 test("staging webhook validates order, persists one receipt, and revokes refunded access", async () => {
     const sqlite = new DatabaseSync(":memory:");
@@ -37,7 +37,7 @@ test("staging webhook validates order, persists one receipt, and revokes refunde
     const result = async (path, body) => (await post(path, body)).json();
 
     const health = await handle(new Request("https://preview.example/health"), env, compare);
-    assert.deepEqual(await health.json(), { status: "ok", mode: "staging", telegram: "pending" });
+    assert.equal(health.status, 503);
     assert.equal((await post("/fixtures/order", { uid: 17, plan: "PRO" }, "wrong")).status, 401);
     assert.equal((await post("/telegram", { padding: "x".repeat(17_000) })).status, 400);
     const order = await result("/fixtures/order", { uid: 17, plan: "PRO" });
@@ -84,6 +84,16 @@ test("staging webhook validates order, persists one receipt, and revokes refunde
     assert.deepEqual(apiMethods, ["getMe"]);
     assert.equal(await connectTestBot(telegramEnv, fakeApi), "ready");
     assert.equal(webhook, telegramEnv.STAGING_WEBHOOK_URL);
+    for (const [info, expected] of [
+        [{url:webhook, pending_update_count:0}, "configured"],
+        [{url:""}, "webhook_mismatch"],
+        [{url:webhook, allowed_updates:["message"]}, "updates_missing"],
+    ]) {
+        await checkDelivery(telegramEnv, async () => Response.json({ok:true,result:info}));
+        const check = await handle(new Request("https://preview.example/health"), telegramEnv, compare);
+        assert.equal((await check.json()).delivery.status, expected);
+        assert.equal(check.status, expected === "configured" ? 200 : 503);
+    }
     const deliverText = text => handle(new Request("https://preview.example/telegram", {
         method: "POST", headers: { "X-Telegram-Bot-Api-Secret-Token": env.STAGING_WEBHOOK_SECRET },
         body: JSON.stringify({ message: { chat: { type: "private", id: 18 }, from: { id: 18 }, text } }),
