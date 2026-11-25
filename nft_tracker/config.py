@@ -91,6 +91,9 @@ class Settings:
         beta = _flag(env, "CLOSED_BETA")
         if beta and (stars_payments or _flag(env, "PUBLIC_USERS") or _flag(env, "GITHUB_ACTIONS") or int(owner) == 0 or str(db_path) == ":memory:"):
             raise ConfigError("Закрытой бете нужны владелец, приватная постоянная база и выключенные платежи.")
+        if env.get("GITHUB_REPOSITORY") == "p7r498p754-cmyk/nft-tracker":
+            support = support or "nishjta"
+            terms = terms or "https://github.com/p7r498p754-cmyk/nft-tracker/blob/main/docs/stars-purchase-terms.md"
         if stars_payments:
             if _flag(env, "GITHUB_ACTIONS") or not _flag(env, "PUBLIC_USERS") or int(owner) == 0 or str(db_path) == ":memory:":
                 raise ConfigError("Оплате требуется непрерывный запуск с приватной базой и PUBLIC_USERS=1")

@@ -167,8 +167,8 @@ def main(argv: list[str]) -> int:
     except ConfigError as e:
         print(f"Ошибка настройки: {e}")
         return 2
-    if cfg.stars_payments and cmd != "loop":
-        print("Режим оплаты Stars требует непрерывного запуска loop")
+    if cfg.stars_payments and cmd not in {"loop", "scan-loop", "scan-once", "register-commands"}:
+        print("Для приёма платежей запустите loop или отдельный webhook с scan-loop")
         return 2
     _setup_logging(cfg)
     LOG.info("NFT Tracker v%s, режим %s", __version__, cmd)

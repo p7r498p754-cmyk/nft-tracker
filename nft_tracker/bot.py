@@ -22,6 +22,7 @@ OWNER = "owner"
 DISCOUNT_CHOICES = (30, 40, 50)
 COMMAND_HINTS = {
     "start": "Включить уведомления и открыть меню",
+    "buy": "Выбрать тариф за Stars",
     "subscription": "Посмотреть тариф и условия подписок",
     "prices": "Открыть каталог цен",
     "gift": "Посмотреть карточку коллекции",
@@ -276,6 +277,15 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
     if command == "/id":
         tg.send(chat, f"Ваш Telegram ID: <code>{chat}</code>\nИспользуйте его только как секрет OWNER_CHAT_ID в настройках хостинга.")
         return
+    if command == "/terms":
+        terms = [[{"text": "Открыть условия покупки", "url": cfg.stars_terms}]] if cfg.stars_terms else None
+        tg.send(chat, "Условия разовой оплаты подписки." if terms else "Условия оплаты пока не опубликованы.", terms)
+        return
+    if command == "/paysupport":
+        text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции. Обращения по покупкам принимает поддержка NFT Tracker."
+                if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
+        tg.send(chat, text)
+        return
     if not beta.allowed(cfg, store, chat):
         tg.send(chat, "🔒 NFT Tracker сейчас работает в закрытом режиме.")
         return
@@ -288,17 +298,12 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
             text = "На связи. Время отправки команды недоступно."
         tg.send(chat, text)
         return
-    if command == "/terms":
-        terms = [[{"text": "Открыть условия покупки", "url": cfg.stars_terms}]] if cfg.stars_terms else None
-        tg.send(chat, "Условия разовой оплаты подписки." if terms else "Условия оплаты пока не опубликованы.", terms)
-        return
-    if command == "/paysupport":
-        text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции. Обращения по покупкам принимает поддержка NFT Tracker."
-                if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
-        tg.send(chat, text)
-        return
+    if command == "/buy":
+        command = "/subscription"
     if command in SERVICE or command == "/prices":
         args = str(msg.get("text", "")).partition(" ")[2].strip()[:150]
+        if command == "/subscription" and args.upper() in PLANS:
+            args = args.upper()
         text, kb = view(cfg, store, tg, chat, key, command, args, now)
         tg.send(chat, text, kb)
         return
