@@ -41,6 +41,18 @@ def _order(db, uid, event):
                       (payload, uid, amount)).fetchone()
 
 
+def pending_plan(db, uid):
+    row = db.execute("""SELECT o.plan FROM star_checkouts c JOIN star_orders o USING(payload)
+        WHERE o.uid=? AND c.query_id IS NOT NULL AND c.completed_charge IS NULL LIMIT 1""",
+                     (uid,)).fetchone()
+    return row[0] if row else None
+
+
+def pending_message(plan):
+    return (f"Ожидается подтверждение оплаты тарифа {plan} от Telegram. "
+            "Если Stars уже списались, повторная оплата не нужна. Если доступ не появился, откройте /paysupport.")
+
+
 def reserve_checkout(db, uid, query, now):
     with db:
         db.execute("BEGIN IMMEDIATE")
@@ -53,9 +65,7 @@ def reserve_checkout(db, uid, query, now):
             return False
         if existing_query is not None:
             return existing_query == query_id
-        outstanding = db.execute("""SELECT 1 FROM star_checkouts c JOIN star_orders o USING(payload)
-            WHERE o.uid=? AND c.query_id IS NOT NULL AND c.completed_charge IS NULL""", (uid,)).fetchone()
-        if outstanding or db.execute("SELECT 1 FROM star_checkouts WHERE query_id=?", (query_id,)).fetchone():
+        if pending_plan(db, uid) or db.execute("SELECT 1 FROM star_checkouts WHERE query_id=?", (query_id,)).fetchone():
             return False
         db.execute("UPDATE star_checkouts SET query_id=? WHERE payload=?", (query_id, query["invoice_payload"]))
         return True

@@ -66,13 +66,14 @@ class StarsPayments(TestCase):
         event = self.invoice()
         self.receipt(event)
         self.assertEqual(entitlement(self.store.db,self.uid,self.stamp)[0],"FREE")
+        other = self.invoice("PLUS")
         self.assertFalse(self.check(event,at=NOW+timedelta(minutes=31)))
         self.assertFalse(self.check(dict(event,total_amount=99)))
         self.assertFalse(self.check(event, uid=18))
         self.assertTrue(self.check(event))
         self.assertTrue(self.check(event))
         self.assertFalse(self.check(event,"different-query"))
-        self.assertFalse(self.check(self.invoice("PLUS"),"another"))
+        self.assertFalse(self.check(other,"another"))
 
     def test_disabled_sales_decline_checkout_and_issue_no_invoice(self):
         event = self.invoice()
@@ -124,3 +125,17 @@ class StarsPayments(TestCase):
             self.stamp += MONTH
             self.assertEqual(entitlement(self.store.db,self.uid,self.stamp),("FREE",None))
             at += timedelta(seconds=MONTH)
+
+    def test_waiting_checkout_visible_only_to_buyer_and_blocks_extra_invoice(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        self.telegram.call.reset_mock()
+        self.update(callback("buy:PLUS",chat=self.uid))
+        self.telegram.call.assert_not_called()
+        self.update(message("/subscription",chat=self.uid))
+        self.assertIn("Ожидается подтверждение оплаты тарифа PRO", self.telegram.sent[-1][1])
+        self.update(message("/subscription",chat=self.uid+1))
+        self.assertNotIn("Ожидается подтверждение", self.telegram.sent[-1][1])
+        self.receipt(event)
+        self.update(message("/subscription",chat=self.uid))
+        self.assertNotIn("Ожидается подтверждение", self.telegram.sent[-1][1])

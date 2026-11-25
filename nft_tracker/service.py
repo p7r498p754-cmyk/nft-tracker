@@ -9,6 +9,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
+from .payments import pending_plan, pending_message
 from .beta import MINUTES
 from .catalog import CURRENCIES, catalog_page
 from .storage import Storage
@@ -222,6 +223,10 @@ def view(cfg, store, tg, uid, key, command, args, now):
     if command == "/admin":
         return admin(cfg, store, tg, uid, args or "menu", now)
     if command == "/subscription":
+        waiting = pending_plan(store.db, uid)
+        if waiting:
+            text, keyboard = menu(store, name, end, preview, sales_enabled=cfg.stars_payments)
+            return text + "\n" + pending_message(waiting), keyboard
         if args in PLANS:
             price = PLANS[args].price
             text = f"<b>{args}</b> · {price} ⭐\n{DETAILS[args]}"

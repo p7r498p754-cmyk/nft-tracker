@@ -11,7 +11,7 @@ from typing import Any
 from . import __version__, beta
 from .service import effective_access, prefs, threshold, view, SUB
 from .subscriptions import PLANS
-from .payments import answer_checkout, create_invoice, settle_receipt
+from .payments import answer_checkout, create_invoice, settle_receipt, pending_message, pending_plan
 from .config import Settings
 from .floors import floor_status
 from .storage import Storage
@@ -322,6 +322,8 @@ def _on_callback(cfg: Settings, store: Storage, tg: TelegramClient, chat: int, e
         elif (chat == cfg.owner_chat_id and cfg.owner_lifetime_ultra
               or effective_access(cfg, store, chat, int(now.timestamp()))[0] != "FREE"):
             tg.send(chat, "У вас уже есть доступ. Тариф можно выбрать после окончания текущего периода.")
+        elif waiting := pending_plan(store.db, chat):
+            tg.send(chat, pending_message(waiting))
         else:
             create_invoice(store.db, tg, chat, plan, int(now.timestamp()))
         return
