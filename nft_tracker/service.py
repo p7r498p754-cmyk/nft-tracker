@@ -38,7 +38,7 @@ def effective_access(cfg, store, uid, now):
         if row and row[1] > now:
             return row[0], row[1], False
         return "FREE", None, False
-    name, end = entitlement(store.db, uid, now)
+    name, end = entitlement(store.db, uid, now, confirmed_only=cfg.stars_payments)
     return name, end, False
 
 

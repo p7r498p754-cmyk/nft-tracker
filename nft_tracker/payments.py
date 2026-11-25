@@ -62,7 +62,7 @@ def reserve_checkout(db, uid, query, now):
         if order is None or not isinstance(query_id, str) or not query_id or order[3] is not None:
             return False
         _, expires, existing_query, _ = order
-        if expires <= now or entitlement(db, uid, now)[0] != "FREE":
+        if expires <= now or entitlement(db, uid, now, confirmed_only=True)[0] != "FREE":
             return False
         if existing_query is not None:
             return existing_query == query_id

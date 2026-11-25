@@ -220,3 +220,10 @@ class StarsPayments(TestCase):
         self.telegram.call.assert_called_once_with("refundStarPayment",
             {"user_id":self.uid,"telegram_payment_charge_id":"fixture-charge"},timeout=5)
         self.assertEqual(entitlement(self.store.db,self.uid,self.stamp),("FREE",None))
+
+    def test_sandbox_receipt_in_migrated_database_cannot_grant_commercial_access(self):
+        from tests.test_subscriptions import grant
+        grant(self.store,self.uid,"ULTRA")
+        self.update(message("/subscription",chat=self.uid))
+        self.assertIn("Ваш тариф: <b>FREE</b>", self.telegram.sent[-1][1])
+        self.assertTrue(self.check(self.invoice("PLUS")))

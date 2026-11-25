@@ -48,10 +48,12 @@ CREATE TABLE IF NOT EXISTS alert_slots (
 """
 
 
-def entitlement(db, uid, now):
+def entitlement(db, uid, now, *, confirmed_only=False):
     row = db.execute("""SELECT o.plan,t.ends FROM star_terms t JOIN star_orders o USING(payload)
         LEFT JOIN star_refunds r ON r.charge=t.charge WHERE o.uid=? AND r.charge IS NULL
-        AND t.starts<=? AND t.ends>? ORDER BY t.ends DESC LIMIT 1""", (uid, now, now)).fetchone()
+        AND t.starts<=? AND t.ends>? AND (?=0 OR EXISTS (SELECT 1 FROM star_checkouts c
+        WHERE c.payload=t.payload AND c.completed_charge=t.charge))
+        ORDER BY t.ends DESC LIMIT 1""", (uid, now, now, int(confirmed_only))).fetchone()
     return row or ("FREE", None)
 
 
