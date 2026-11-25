@@ -89,6 +89,20 @@ class StarsPayments(TestCase):
                                "PORTALS_API_KEY": "test", "PUBLIC_USERS": "1",
                                "STARS_PAYMENTS": "1", "GITHUB_ACTIONS": "true"})
 
+    def test_closed_original_bot_publishes_terms_and_support(self):
+        self.cfg = Settings.from_env({
+            "GITHUB_REPOSITORY": "p7r498p754-cmyk/nft-tracker",
+            "GITHUB_ACTIONS": "true", "OWNER_CHAT_ID": "777", "TELEGRAM_BOT_TOKEN": "test",
+        }, need_portals=False)
+        self.update(message("/terms", chat=self.uid))
+        self.assertEqual(self.telegram.sent[-1][2][0][0]["url"], self.cfg.stars_terms)
+        self.assertTrue(self.cfg.stars_terms.endswith("/main/docs/stars-purchase-terms.md"))
+        self.update(message("/paysupport", chat=self.uid))
+        self.assertIn("@nishjta", self.telegram.sent[-1][1])
+        self.update(message("/buy", chat=self.uid))
+        self.assertIn("закрытом режиме", self.telegram.sent[-1][1])
+        self.telegram.call.assert_not_called()
+
     def test_terms_are_shown_before_requesting_invoice(self):
         self.update(message("/subscription PRO", chat=self.uid))
         keyboard = self.telegram.sent[-1][2]

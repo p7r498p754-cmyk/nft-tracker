@@ -87,6 +87,9 @@ class Settings:
         stars_payments = _flag(env, "STARS_PAYMENTS")
         support = env.get("STARS_SUPPORT", "").strip().removeprefix("@")
         terms = env.get("STARS_TERMS_URL", "").strip()
+        if env.get("GITHUB_REPOSITORY") == "p7r498p754-cmyk/nft-tracker":
+            support = support or "nishjta"
+            terms = terms or "https://github.com/p7r498p754-cmyk/nft-tracker/blob/main/docs/stars-purchase-terms.md"
         if stars_payments:
             if _flag(env, "GITHUB_ACTIONS") or not _flag(env, "PUBLIC_USERS") or int(owner) == 0 or str(db_path) == ":memory:":
                 raise ConfigError("Оплате требуется непрерывный запуск с приватной базой и PUBLIC_USERS=1")

@@ -242,6 +242,15 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
     if command == "/id":
         tg.send(chat, f"Ваш Telegram ID: <code>{chat}</code>\nИспользуйте его только как секрет OWNER_CHAT_ID в настройках хостинга.")
         return
+    if command == "/terms":
+        terms = [[{"text": "Открыть условия покупки", "url": cfg.stars_terms}]] if cfg.stars_terms else None
+        tg.send(chat, "Условия разовой оплаты подписки." if terms else "Условия оплаты пока не опубликованы.", terms)
+        return
+    if command == "/paysupport":
+        text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции. Обращения по покупкам принимает поддержка NFT Tracker."
+                if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
+        tg.send(chat, text)
+        return
     if chat != cfg.owner_chat_id and not cfg.public_users:
         tg.send(chat, "🔒 NFT Tracker сейчас работает в закрытом режиме.")
         return
@@ -252,15 +261,6 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
             text = f"На связи. От отправки команды до начала обработки прошло около {int(now.timestamp()) - sent} с."
         else:
             text = "На связи. Время отправки команды недоступно."
-        tg.send(chat, text)
-        return
-    if command == "/terms":
-        terms = [[{"text": "Открыть условия покупки", "url": cfg.stars_terms}]] if cfg.stars_terms else None
-        tg.send(chat, "Условия разовой оплаты подписки." if terms else "Условия оплаты пока не опубликованы.", terms)
-        return
-    if command == "/paysupport":
-        text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции. Обращения по покупкам принимает поддержка NFT Tracker."
-                if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
         tg.send(chat, text)
         return
     if command == "/buy":
