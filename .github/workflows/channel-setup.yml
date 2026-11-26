@@ -1,0 +1,28 @@
+name: channel-setup
+# Manual one-off: checks the bot's admin rights in the paid/free channels and,
+# if PAID_CHANNEL_INVITE is empty, creates a Telegram Stars subscription link.
+# The link is sent to the owner in Telegram only, never printed to this log.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check channels and create subscription link
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+          PAID_CHANNEL_ID: ${{ vars.PAID_CHANNEL_ID }}
+          FREE_CHANNEL_ID: ${{ vars.FREE_CHANNEL_ID }}
+          PAID_CHANNEL_INVITE: ${{ vars.PAID_CHANNEL_INVITE }}
+          CHANNEL_PRICE: ${{ vars.CHANNEL_PRICE }}
+        run: python -m nft_tracker channel-setup

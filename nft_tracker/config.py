@@ -29,6 +29,25 @@ def _int(env: Mapping[str, str], name: str, default: int, lo: int, hi: int) -> i
     return value
 
 
+def _chat(env: Mapping[str, str], name: str) -> int | str:
+    """Channel reference: numeric id (-100...) or public @username; empty = off."""
+    raw = env.get(name, "").strip()
+    if not raw or raw == "0":
+        return 0
+    if re.fullmatch(r"-?\d{5,20}", raw):
+        return int(raw)
+    if re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}", raw):
+        return raw
+    raise ConfigError(f"{name}: укажите числовой ID канала (-100…) или @username")
+
+
+def _invite(env: Mapping[str, str], name: str) -> str:
+    raw = env.get(name, "").strip()
+    if raw and not re.fullmatch(r"https://t\.me/(\+|joinchat/)[A-Za-z0-9_-]{8,64}", raw):
+        raise ConfigError(f"{name}: нужна ссылка-приглашение вида https://t.me/+…")
+    return raw
+
+
 def _flag(env: Mapping[str, str], name: str) -> bool:
     return env.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -56,6 +75,15 @@ class Settings:
     stars_payments: bool = False
     stars_support: str = ""
     stars_terms: str = ""
+    # Channel mode: Telegram itself sells access to the paid channel (Stars
+    # subscription invite link), so no payment code or user database is needed.
+    paid_channel: int | str = 0
+    free_channel: int | str = 0
+    paid_channel_invite: str = ""
+    channel_discount: int = 30
+    free_delay_min: int = 60
+    free_max_per_day: int = 3
+    channel_price: int = 250
 
     @property
     def setup_mode(self) -> bool:
@@ -104,6 +132,13 @@ class Settings:
         return cls(
             telegram_token=token, portals_key=key, owner_chat_id=int(owner),
             db_path=db_path,
+            paid_channel=_chat(env, "PAID_CHANNEL_ID"),
+            free_channel=_chat(env, "FREE_CHANNEL_ID"),
+            paid_channel_invite=_invite(env, "PAID_CHANNEL_INVITE"),
+            channel_discount=_int(env, "CHANNEL_DISCOUNT", 30, 20, 90),
+            free_delay_min=_int(env, "FREE_DELAY_MIN", 60, 0, 1440),
+            free_max_per_day=_int(env, "FREE_MAX_PER_DAY", 3, 0, 50),
+            channel_price=_int(env, "CHANNEL_PRICE", 250, 1, 10000),
             stars_payments=stars_payments, stars_support=support, stars_terms=terms,
             price_unit=(env.get("PRICE_UNIT", "GRAM").strip() or "GRAM")[:12],
             timezone=env.get("TIMEZONE", "UTC").strip() or "UTC",
