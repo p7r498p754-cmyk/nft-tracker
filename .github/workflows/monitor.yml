@@ -78,6 +78,12 @@ jobs:
           TIMEZONE: ${{ vars.TIMEZONE }}
           LISTING_PAGES: ${{ vars.LISTING_PAGES }}
           ALLOW_NO_LINK_ALERTS: ${{ vars.ALLOW_NO_LINK_ALERTS }}
+          PAID_CHANNEL_ID: ${{ vars.PAID_CHANNEL_ID }}
+          FREE_CHANNEL_ID: ${{ vars.FREE_CHANNEL_ID }}
+          PAID_CHANNEL_INVITE: ${{ vars.PAID_CHANNEL_INVITE }}
+          CHANNEL_DISCOUNT: ${{ vars.CHANNEL_DISCOUNT }}
+          FREE_DELAY_MIN: ${{ vars.FREE_DELAY_MIN }}
+          FREE_MAX_PER_DAY: ${{ vars.FREE_MAX_PER_DAY }}
         run: python -m nft_tracker serve-once
       - name: Save state
         if: always()

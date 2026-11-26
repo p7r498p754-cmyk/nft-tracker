@@ -1,4 +1,4 @@
-"""CLI: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}"""
+"""CLI: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once|channel-setup}"""
 from __future__ import annotations
 
 import logging
@@ -58,8 +58,9 @@ def scan_market(cfg, store, tg, portals):
         raise ConfigError("Не задан PORTALS_API_KEY для мониторинга")
     LOG.info("Активных получателей: %s", len(store.active_users()))
     rep = run_cycle(cfg, store, tg, portals)
-    LOG.info("Проверка: объявлений=%s кандидатов=%s отправлено=%s без_ссылки=%s не_подтверждено=%s новых_продаж=%s",
-             rep.listings, rep.candidates, rep.alerts, rep.skipped_no_link, rep.skipped_unverified, rep.new_sales)
+    LOG.info("Проверка: объявлений=%s кандидатов=%s отправлено=%s в_канал=%s тизеров=%s без_ссылки=%s не_подтверждено=%s новых_продаж=%s",
+             rep.listings, rep.candidates, rep.alerts, rep.channel_posts, rep.teasers, rep.skipped_no_link,
+             rep.skipped_unverified, rep.new_sales)
     if rep.error:
         LOG.warning("Ошибка проверки: %s", rep.error)
     if rep.warning:
@@ -152,13 +153,39 @@ def run_loop(cfg, store, tg, portals, *, once=False):
             stop.set()
 
 
-def main(argv: list[str]) -> int:
-    cmd = argv[1] if len(argv) > 1 else "run"
-    if cmd not in {"run", "loop", "diagnose", "commands", "register-commands", "serve-once"}:
-        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}")
+def channel_setup(cfg, tg) -> int:
+    """Manual one-off: check channel rights, create the Stars subscription link."""
+    from . import channels
+    if cfg.setup_mode:
+        LOG.error("Сначала задайте OWNER_CHAT_ID")
         return 2
     try:
-        cfg = Settings.from_env(need_portals=cmd not in {"commands", "register-commands"})
+        ok, lines = channels.setup_report(cfg, tg)
+        for line in lines:
+            LOG.info(line)
+        report = "🛠 <b>Настройка каналов</b>\n" + "\n".join(lines)
+        if ok and not cfg.paid_channel_invite:
+            link = channels.create_paid_invite(cfg, tg)
+            report += (f"\n\n⭐ Ссылка-подписка ({cfg.channel_price} Stars / 30 дней):\n{link}\n\n"
+                       "Сохраните её в GitHub → Settings → Secrets and variables → Actions → Variables "
+                       "как PAID_CHANNEL_INVITE. Повторный запуск без этой переменной создаст ещё одну ссылку.")
+            LOG.info("Ссылка-подписка создана и отправлена владельцу в Telegram")
+        elif ok:
+            report += "\n\nСсылка-подписка уже задана в PAID_CHANNEL_INVITE."
+        tg.send(cfg.owner_chat_id, report)
+    except TelegramError as error:
+        LOG.error("Настройка каналов: %s", error)
+        return 1
+    return 0 if ok else 1
+
+
+def main(argv: list[str]) -> int:
+    cmd = argv[1] if len(argv) > 1 else "run"
+    if cmd not in {"run", "loop", "diagnose", "commands", "register-commands", "serve-once", "channel-setup"}:
+        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once|channel-setup}")
+        return 2
+    try:
+        cfg = Settings.from_env(need_portals=cmd not in {"commands", "register-commands", "channel-setup"})
     except ConfigError as e:
         print(f"Ошибка настройки: {e}")
         return 2
@@ -185,6 +212,8 @@ def main(argv: list[str]) -> int:
             return 1
         LOG.info("Telegram подтвердил подсказки команд в личном чате")
         return 0
+    if cmd == "channel-setup":
+        return channel_setup(cfg, TelegramClient(cfg.telegram_token))
     if cmd == "commands":
         store = Storage(cfg.db_path)
         try:

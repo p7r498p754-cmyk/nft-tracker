@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from . import channels
 from .bot import OWNER
 from .subscriptions import PLANS, reserve_alert
 from .service import effective_access, prefs, fits, limits, threshold
@@ -36,6 +37,8 @@ class CycleReport:
     skipped_no_link: int = 0
     skipped_unverified: int = 0
     new_sales: int = 0
+    channel_posts: int = 0
+    teasers: int = 0
     error: str | None = None      # fatal: cycle could not run
     warning: str | None = None    # non-fatal (e.g. one lot could not be re-checked)
 
@@ -145,12 +148,28 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
     pending: list[tuple[Signal, User, str | None]] = []
     pending_keys: set[tuple[str, str]] = set()
     check_events: dict[tuple[str, Decimal], MarketEvent] = {}
+    channel_on = channels.enabled(cfg)
+    channel_pending: list[tuple[Signal, str, str | None]] = []
+    channel_keys: set[str] = set()
 
     # First evaluate all candidates. Verify distinct gifts in batches to save
     # requests (the free Portals tier is limited to 1 request/second).
     for ev in sorted(listings, key=lambda e: e.event_time):
         if now - ev.event_time > max_age or ev.event_time > now + timedelta(minutes=5):
             continue
+        if channel_on:
+            sig = evaluate(ev, sales, cfg.channel_discount, now, cfg.model_extra_margin)
+            sid = signal_id(sig) if sig else ""
+            if sig and sid not in channel_keys and not channels.already_posted(store, sid):
+                channel_keys.add(sid)
+                rep.candidates += 1
+                if ev.link is None and not cfg.allow_no_link_alerts:
+                    rep.skipped_no_link += 1
+                    no_link_hits += 1
+                    retry_needed = True
+                else:
+                    channel_pending.append((sig, sid, ev.link))
+                    check_events[(ev.gift_id, ev.price)] = ev
         for user in users:
             plan = PLANS[plans[user.user_key]]
             if not fits(ev, settings[user.user_key], plan):
@@ -226,6 +245,25 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
             continue
         store.mark_sent(user.user_key, sid, now)
         rep.alerts += 1
+
+    for sig, sid, link in channel_pending:
+        if not verified.get((sig.event.gift_id, sig.event.price), False):
+            rep.skipped_unverified += 1
+            continue
+        try:
+            if channels.publish_paid(cfg, store, tg, sig, sid, link, now):
+                rep.channel_posts += 1
+        except TelegramError as e:
+            rep.error = str(e)
+            retry_needed = True
+
+    if channel_on:
+        try:
+            rep.teasers = channels.publish_teasers(cfg, store, tg, portals, now)
+            channels.daily_stats(cfg, store, tg, now)
+        except Exception as e:  # noqa: BLE001 - marketing posts must never break monitoring
+            rep.warning = (rep.warning + " | " if rep.warning else "") + f"Бесплатный канал: {e}"
+        channels.prune(store, now)
 
     if complete and not retry_needed and checkpoint is not None and checkpoint >= since:
         store.set("last_listing_at", iso(checkpoint))

@@ -232,6 +232,12 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         return
     if msg.get("from") and msg["from"].get("id") != chat:
         return
+    origin = msg.get("forward_origin") or {}
+    if chat == cfg.owner_chat_id and origin.get("type") == "channel":
+        channel = origin.get("chat") or {}
+        tg.send(chat, f"ID канала «{html.escape(str(channel.get('title', '')))}»: <code>{channel.get('id')}</code>\n"
+                      "Укажите его в GitHub Variables как PAID_CHANNEL_ID или FREE_CHANNEL_ID.")
+        return
     command = str(msg.get("text") or "").split(" ")[0].split("@")[0].lower()
     if command == "/admin" and (msg.get("from") or {}).get("id") != chat:
         return
