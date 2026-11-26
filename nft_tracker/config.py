@@ -34,6 +34,11 @@ def _chat(env: Mapping[str, str], name: str) -> int | str:
     raw = env.get(name, "").strip()
     if not raw or raw == "0":
         return 0
+    link = re.fullmatch(r"(?:https?://)?(?:t\.me|telegram\.me)/([A-Za-z][A-Za-z0-9_]{4,31})/?", raw)
+    if link:
+        raw = "@" + link.group(1)
+    elif re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{4,31}", raw):
+        raw = "@" + raw
     if re.fullmatch(r"-?\d{5,20}", raw):
         return int(raw)
     if re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{4,31}", raw):

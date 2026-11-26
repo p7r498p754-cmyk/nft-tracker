@@ -160,6 +160,10 @@ class SetupAndConfig(unittest.TestCase):
                                  "PAID_CHANNEL_INVITE": INVITE, "CHANNEL_PRICE": "300"})
         self.assertEqual((cfg.paid_channel, cfg.free_channel, cfg.channel_price), (PAID, "@nft_free_test", 300))
 
+    def test_config_accepts_public_links_and_bare_names(self):
+        for raw in ("https://t.me/nftt_traker", "t.me/nftt_traker/", "nftt_traker", "@nftt_traker"):
+            self.assertEqual(Settings.from_env({**self.ENV, "FREE_CHANNEL_ID": raw}).free_channel, "@nftt_traker")
+
     def test_config_rejects_bad_values(self):
         for k, v in (("PAID_CHANNEL_ID", "abc"), ("PAID_CHANNEL_INVITE", "http://evil"), ("CHANNEL_PRICE", "0")):
             with self.assertRaises(ConfigError):
