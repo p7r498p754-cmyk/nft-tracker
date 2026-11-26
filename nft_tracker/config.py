@@ -88,7 +88,14 @@ class Settings:
     channel_discount: int = 30
     free_delay_min: int = 60
     free_max_per_day: int = 3
-    channel_price: int = 250
+    channel_price: int = 199
+    plus_channel: int | str = 0
+    ultra_channel: int | str = 0
+    plus_channel_invite: str = ""
+    ultra_channel_invite: str = ""
+    plus_price: int = 99
+    ultra_price: int = 399
+    plus_daily: int = 15
 
     @property
     def setup_mode(self) -> bool:
@@ -143,7 +150,14 @@ class Settings:
             channel_discount=_int(env, "CHANNEL_DISCOUNT", 30, 20, 90),
             free_delay_min=_int(env, "FREE_DELAY_MIN", 60, 0, 1440),
             free_max_per_day=_int(env, "FREE_MAX_PER_DAY", 3, 0, 50),
-            channel_price=_int(env, "CHANNEL_PRICE", 250, 1, 10000),
+            channel_price=_int(env, "CHANNEL_PRICE", 199, 1, 10000),
+            plus_channel=_chat(env, "PLUS_CHANNEL_ID"),
+            ultra_channel=_chat(env, "ULTRA_CHANNEL_ID"),
+            plus_channel_invite=_invite(env, "PLUS_CHANNEL_INVITE"),
+            ultra_channel_invite=_invite(env, "ULTRA_CHANNEL_INVITE"),
+            plus_price=_int(env, "PLUS_PRICE", 99, 1, 10000),
+            ultra_price=_int(env, "ULTRA_PRICE", 399, 1, 10000),
+            plus_daily=_int(env, "PLUS_DAILY", 15, 1, 300),
             stars_payments=stars_payments, stars_support=support, stars_terms=terms,
             price_unit=(env.get("PRICE_UNIT", "GRAM").strip() or "GRAM")[:12],
             timezone=env.get("TIMEZONE", "UTC").strip() or "UTC",

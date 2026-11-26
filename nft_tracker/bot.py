@@ -12,6 +12,7 @@ from . import __version__
 from .service import effective_access, prefs, threshold, view, SUB
 from .subscriptions import PLANS
 from .payments import answer_checkout, create_invoice, settle_receipt, pending_message, pending_plan
+from .channels import shop
 from .config import Settings
 from .floors import floor_status
 from .storage import Storage
@@ -256,6 +257,11 @@ def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dic
         text = (f"Поддержка по платежам: @{html.escape(cfg.stars_support)}. Укажите дату и тариф из квитанции. Обращения по покупкам принимает поддержка NFT Tracker."
                 if cfg.stars_support else "По вопросам платежей обратитесь к владельцу сервиса.")
         tg.send(chat, text)
+        return
+    storefront = shop(cfg)
+    if storefront and (command in ("/buy", "/subscription") or
+                       (chat != cfg.owner_chat_id and not cfg.public_users and command in ("/start", "/help"))):
+        tg.send(chat, *storefront)
         return
     if chat != cfg.owner_chat_id and not cfg.public_users:
         tg.send(chat, "🔒 NFT Tracker сейчас работает в закрытом режиме.")
