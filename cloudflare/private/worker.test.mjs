@@ -36,3 +36,15 @@ test("only matching live listings survive verification", async () => {
         url.pathname.endsWith("/actions/") ? {actions} : {results:rows}));
     assert.deepEqual(result.listings.map(row=>row.id),["same"]);
 });
+
+test("Portals distinguishes redirects, malformed bodies and transport errors without echoing upstream text", async () => {
+    const {recentListings} = await import("./worker.mjs");
+    const probe = load => recentListings(" test-key ",Date.now(),load);
+    assert.deepEqual(await probe(async (_,init)=>{
+        assert.equal(init.redirect,"manual");
+        assert.equal(init.headers.Authorization,"partners test-key");
+        return new Response(null,{status:302});
+    }),{status:"upstream_http",code:302});
+    assert.deepEqual(await probe(async()=>new Response("bad body")),{status:"upstream_invalid_json"});
+    assert.deepEqual(await probe(async()=>{throw Error("private details");}),{status:"upstream_transport"});
+});

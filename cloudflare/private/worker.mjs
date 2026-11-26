@@ -1,14 +1,33 @@
 // Only an authenticated internal caller may exercise the release candidate.
 // Before cutover, the caller supplies the private owner identity via a binding.
+async function readPortals(url,key,stage,load) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(),8000);
+    try {
+        // Never forward partner credentials to a redirect destination.
+        const response = await load(url,{redirect:"manual",signal:controller.signal,
+            headers:{Accept:"application/json",Authorization:"partners " + key.trim()}});
+        if (!response.ok) return {status:stage+"_http",code:response.status};
+        try {
+            return {status:"ok",data:await response.json()};
+        } catch {
+            return {status:stage+(controller.signal.aborted?"_timeout":"_invalid_json")};
+        }
+    } catch {
+        return {status:stage+(controller.signal.aborted?"_timeout":"_transport")};
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 export async function recentListings(key, now, load=fetch) {
     if (!key) return {status:"key_missing"};
     const url = new URL("https://portal-market.com/partners/market/actions/");
     for (const kind of ["listing","price_update"]) url.searchParams.append("action_types",kind);
     for (const [k,v] of Object.entries({limit:"20",offset:"0",sort_by:"created_at desc"})) url.searchParams.set(k,v);
-    const response = await load(url, {redirect:"error",signal:AbortSignal.timeout(8000),
-        headers:{Accept:"application/json", Authorization:"partners " + key}});
-    if (!response.ok) return {status:"upstream_http",code:response.status};
-    const {actions} = await response.json();
+    const response = await readPortals(url,key,"upstream",load);
+    if (response.status !== "ok") return response;
+    const actions = response.data?.actions;
     if (!Array.isArray(actions) || actions.length>20) return {status:"invalid_response"};
     const listings = [];
     for (const event of actions) {
@@ -29,10 +48,9 @@ export async function recentListings(key, now, load=fetch) {
     for (const id of latest.keys()) search.searchParams.append("ids",id);
     search.searchParams.set("status","listed");
     search.searchParams.set("limit",String(latest.size));
-    const checked = await load(search,{redirect:"error",signal:AbortSignal.timeout(8000),
-        headers:{Accept:"application/json",Authorization:"partners " + key}});
-    if (!checked.ok) return {status:"verification_http",code:checked.status};
-    const {results} = await checked.json();
+    const checked = await readPortals(search,key,"verification",load);
+    if (checked.status !== "ok") return checked;
+    const results = checked.data?.results;
     if (!Array.isArray(results)) return {status:"invalid_verification"};
     const verified = new Map();
     const decimal = value => String(value).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/,"");
