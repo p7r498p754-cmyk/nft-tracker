@@ -25,3 +25,14 @@ test("private controls preserve settings and failed catalog reads record partial
     await assert.rejects(worker.scheduled({scheduledTime:1},env));
     assert.deepEqual(JSON.parse(sql.prepare("SELECT value FROM state WHERE key='rc_route_health'").get().value),{at:1,status:200,prices:null,rows:0});
 });
+
+test("only matching live listings survive verification", async () => {
+    const {recentListings} = await import("./worker.mjs");
+    const now = Date.now();
+    const actions = ["same","sold","changed"].map(id=>({type:"listing",created_at:new Date(now).toISOString(),
+        nft:{id,name:"Gift"},amount:"1.00"}));
+    const rows = actions.map(({nft})=>({...nft,status:nft.id==="sold"?"sold":"listed",price:nft.id==="changed"?"1.01":"1"}));
+    const result = await recentListings("fixture",now,async url=>Response.json(
+        url.pathname.endsWith("/actions/") ? {actions} : {results:rows}));
+    assert.deepEqual(result.listings.map(row=>row.id),["same"]);
+});

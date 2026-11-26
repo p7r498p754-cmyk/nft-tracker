@@ -19,7 +19,29 @@ export async function recentListings(key, now, load=fetch) {
             !/^[0-9]+(?:[.][0-9]+)?$/.test(String(event.amount)) || !(Number(event.amount)>0)) return {status:"invalid_response"};
         if (at<=now && now-at<=45*60*1000) listings.push({id:event.nft.id,name:event.nft.name,price:String(event.amount),at});
     }
-    return {status:"ok",listings};
+    const latest = new Map();
+    for (const item of listings) {
+        if (!latest.has(item.id) || latest.get(item.id).at < item.at) latest.set(item.id,item);
+    }
+    if (!latest.size) return {status:"ok",listings:[],observed:0};
+    await new Promise(resolve => setTimeout(resolve,1100));
+    const search = new URL("https://portal-market.com/partners/nfts/search");
+    for (const id of latest.keys()) search.searchParams.append("ids",id);
+    search.searchParams.set("status","listed");
+    search.searchParams.set("limit",String(latest.size));
+    const checked = await load(search,{redirect:"error",signal:AbortSignal.timeout(8000),
+        headers:{Accept:"application/json",Authorization:"partners " + key}});
+    if (!checked.ok) return {status:"verification_http",code:checked.status};
+    const {results} = await checked.json();
+    if (!Array.isArray(results)) return {status:"invalid_verification"};
+    const verified = new Map();
+    const decimal = value => String(value).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/,"");
+    for (const row of results) {
+        const item = latest.get(row?.id);
+        if (item && row.status==="listed" && row.name===item.name && decimal(row.price)===decimal(item.price))
+            verified.set(item.id,item);
+    }
+    return {status:"ok",listings:[...verified.values()],observed:latest.size};
 }
 
 const worker = {
@@ -30,7 +52,7 @@ const worker = {
         await env.DB.prepare("INSERT OR REPLACE INTO state(key,value) VALUES (?,?)")
             .bind("rc_portals_attempt",JSON.stringify({at:event.scheduledTime,status:market.status,code:market.code})).run();
         if (market.status === "ok") await env.DB.prepare("INSERT OR REPLACE INTO state(key,value) VALUES (?,?)")
-            .bind("rc_portals_page", JSON.stringify({at:event.scheduledTime,listings:market.listings})).run();
+            .bind("rc_portals_page", JSON.stringify({at:event.scheduledTime,listings:market.listings,observed:market.observed})).run();
         const probe = name => worker.fetch(new Request("https://internal/command?name="+name, {
             method:"POST", headers:{"X-NFT-Internal-Token":env.INTERNAL_TOKEN}
         }),env);
