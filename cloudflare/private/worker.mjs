@@ -5,11 +5,17 @@ const worker = {
         const probe = name => worker.fetch(new Request("https://internal/command?name="+name, {
             method:"POST", headers:{"X-NFT-Internal-Token":env.INTERNAL_TOKEN}
         }),env);
-        const status = await probe("status"), prices = await probe("prices");
-        const rows = prices.ok ? (await prices.json()).rows.length : 0;
-        await env.DB.prepare("INSERT OR REPLACE INTO state(key,value) VALUES (?,?)").bind(
-            "rc_route_health",JSON.stringify({at:event.scheduledTime,status:status.status,prices:prices.status,rows})
-        ).run();
+        const result = {at:event.scheduledTime, status:null, prices:null, rows:0};
+        try {
+            const status = await probe("status");
+            result.status = status.status;
+            const prices = await probe("prices");
+            result.prices = prices.status;
+            if (prices.ok) result.rows = (await prices.json()).rows.length;
+        } finally {
+            await env.DB.prepare("INSERT OR REPLACE INTO state(key,value) VALUES (?,?)")
+                .bind("rc_route_health", JSON.stringify(result)).run();
+        }
     },
     async fetch(request, env) {
         if (request.method !== "POST" || new URL(request.url).pathname !== "/command")
