@@ -23,5 +23,5 @@ test("private controls preserve settings and failed catalog reads record partial
     await call("stop","fixture");
     assert.deepEqual(await (await call("status","fixture")).json(),{monitoring_enabled:false,discount_percent:40});
     await assert.rejects(worker.scheduled({scheduledTime:1},env));
-    assert.deepEqual(JSON.parse(sql.prepare("SELECT value FROM state").get().value),{at:1,status:200,prices:null,rows:0});
+    assert.deepEqual(JSON.parse(sql.prepare("SELECT value FROM state WHERE key='rc_route_health'").get().value),{at:1,status:200,prices:null,rows:0});
 });

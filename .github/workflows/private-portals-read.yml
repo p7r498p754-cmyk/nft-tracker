@@ -1,0 +1,25 @@
+name: Verify private Worker Portals reader
+on:
+  push:
+    branches: [beta-0.7.0]
+    paths: ['cloudflare/private/worker.mjs','.github/workflows/private-portals-read.yml']
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - env:
+          PORTALS_API_KEY: ${{ secrets.PORTALS_API_KEY }}
+        run: |
+          node --input-type=module <<'JS'
+          import {recentListings} from './cloudflare/private/worker.mjs';
+          const page = await recentListings(process.env.PORTALS_API_KEY, Date.now());
+          if (page.status !== 'ok') throw Error(page.status + ' ' + (page.code ?? ''));
+          console.log('Verified fresh Portals events:', page.listings.length);
+          JS
