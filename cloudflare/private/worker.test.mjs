@@ -22,6 +22,16 @@ test("private controls preserve settings and failed catalog reads record partial
     sql.exec("UPDATE users SET min_discount=40");
     await call("stop","fixture");
     assert.deepEqual(await (await call("status","fixture")).json(),{monitoring_enabled:false,discount_percent:40});
+    const at = Date.now();
+    const put = sql.prepare("INSERT OR REPLACE INTO state VALUES (?,?)");
+    put.run("rc_portals_page", JSON.stringify({at,listings:[{id:"fixture"}]}));
+    put.run("rc_portals_attempt", JSON.stringify({at,status:"ok"}));
+    assert.equal((await (await call("markets","fixture")).json()).verified_count,1);
+    put.run("rc_portals_attempt", JSON.stringify({at:at+1,status:"upstream_http",code:401}));
+    const failed = await (await call("markets","fixture")).json();
+    assert.equal(failed.fresh,false);
+    assert.equal(failed.verified_count,null);
+    assert.equal(failed.last_success_at,at);
     await assert.rejects(worker.scheduled({scheduledTime:1},env));
     assert.deepEqual(JSON.parse(sql.prepare("SELECT value FROM state WHERE key='rc_route_health'").get().value),{at:1,status:200,prices:null,rows:0});
 });

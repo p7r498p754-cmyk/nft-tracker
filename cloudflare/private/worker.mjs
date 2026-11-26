@@ -95,6 +95,17 @@ const worker = {
             await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.INTERNAL_TOKEN))))
             return new Response(null, {status:403});
         const cmd = new URL(request.url).searchParams.get("name");
+        if (cmd === "markets") {
+            const attempt = await env.DB.prepare("SELECT value FROM state WHERE key='rc_portals_attempt'").first();
+            const page = await env.DB.prepare("SELECT value FROM state WHERE key='rc_portals_page'").first();
+            const last = attempt && JSON.parse(attempt.value);
+            const saved = page && JSON.parse(page.value);
+            const age = saved ? Date.now()-saved.at : Infinity;
+            const fresh = last?.status === "ok" && last.at === saved?.at && age >= 0 && age < 600000;
+            return Response.json({source:"Portals",kind:"listings",status:last?.status ?? "pending",
+                code:last?.code ?? null,last_success_at:saved?.at ?? null,fresh,
+                verified_count:fresh ? saved.listings.length : null});
+        }
         if (cmd === "prices") {
             const row = await env.CATALOG.prepare("SELECT at,snapshot FROM catalog ORDER BY at DESC LIMIT 1").first();
             if (!row) return Response.json({error:"catalog_pending"},{status:503});
