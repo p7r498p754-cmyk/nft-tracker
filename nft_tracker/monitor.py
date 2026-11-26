@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from . import beta
 from .bot import OWNER
 from .subscriptions import PLANS, reserve_alert
 from .service import effective_access, prefs, fits, limits, threshold
@@ -136,6 +137,10 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
     sales = store.sales()
     users = store.active_users()
     plans = {u.user_key: effective_access(cfg, store, u.chat_id or cfg.owner_chat_id, int(now.timestamp()))[0] for u in users}
+    if cfg.closed_beta or cfg.public_users:
+        listings = beta.feed(store, [e for e in listings if e.event_time <= now], oldest_eligible)
+        users = [u for u in users if beta.allowed(cfg, store, u.chat_id or cfg.owner_chat_id)
+                 and beta.due(store, u, plans[u.user_key], int(now.timestamp()))]
     discounts = {u.user_key: threshold(store, u, PLANS[plans[u.user_key]]) for u in users}
     settings = {u.user_key: prefs(store, u.user_key) for u in users}
     rep.recipients = len(users)
@@ -167,7 +172,6 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
             if link is None and not cfg.allow_no_link_alerts:
                 rep.skipped_no_link += 1
                 no_link_hits += 1
-                retry_needed = True
                 continue
             pending.append((sig, user, link))
             check_events[(ev.gift_id, ev.price)] = ev
@@ -227,7 +231,11 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         store.mark_sent(user.user_key, sid, now)
         rep.alerts += 1
 
-    if complete and not retry_needed and checkpoint is not None and checkpoint >= since:
+    if (cfg.closed_beta or cfg.public_users) and complete and not retry_needed:
+        with store.db:
+            store.db.executemany("INSERT OR REPLACE INTO beta_ticks VALUES (?,?)",
+                                 [(u.user_key, int(now.timestamp())) for u in users if store.user(u.user_key)])
+    if complete and not retry_needed and not no_link_hits and checkpoint is not None and checkpoint >= since:
         store.set("last_listing_at", iso(checkpoint))
 
     if no_link_hits:
@@ -260,6 +268,8 @@ def _record(store: Storage, tg: TelegramClient, cfg: Settings, rep: CycleReport,
     else:
         if cfg.on_actions and cfg.github_event == "schedule":
             meta["scheduled_ok_at"] = iso(now)
+        if meta.get("ok_at"):
+            meta["interval_seconds"] = int((now - datetime.fromisoformat(meta["ok_at"])).total_seconds())
         meta.update(error=None, failures=0, ok_at=iso(now), listings=rep.listings, alerts=rep.alerts,
                     candidates=rep.candidates, unverified=rep.skipped_unverified, missing_link=rep.skipped_no_link,
                     recipients=rep.recipients)

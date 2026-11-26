@@ -9,8 +9,9 @@ from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
-from .payments import pending_plan, pending_message
-from .catalog import CURRENCIES, catalog_page
+from .payments import owner_refund, pending_plan, pending_message
+from .beta import MINUTES
+from .catalog import CURRENCIES, catalog_page, visible_catalog
 from .storage import Storage
 from .subscriptions import PLANS, entitlement
 from .telegram import TelegramError
@@ -26,13 +27,18 @@ DETAILS = {
 
 def effective_access(cfg, store, uid, now):
     if uid == cfg.owner_chat_id and uid > 0:
-        trial = store.get_json("owner_plan_preview")
+        trial = {} if cfg.stars_payments else store.get_json("owner_plan_preview")
         name, end = trial.get("plan"), trial.get("end")
         if name in PLANS and type(end) is int and end > now:
             return name, end, True
         if cfg.owner_lifetime_ultra:
             return "ULTRA", None, False
-    name, end = entitlement(store.db, uid, now)
+    if cfg.closed_beta and uid != cfg.owner_chat_id:
+        row = store.db.execute("SELECT plan,ends FROM beta_invites WHERE uid=?", (uid,)).fetchone()
+        if row and row[1] > now:
+            return row[0], row[1], False
+        return "FREE", None, False
+    name, end = entitlement(store.db, uid, now, confirmed_only=cfg.stars_payments)
     return name, end, False
 
 
@@ -80,7 +86,7 @@ def menu(store, name, end, preview=False, *, sales_enabled=False):
     for tier, plan in PLANS.items():
         cost = f"{plan.price} ⭐ / 30 дней" if plan.price else "бесплатно"
         alerts, favorites = limits(store, tier)
-        lines.extend([f"<b>{tier}</b> · {cost}", f"{alerts} сигналов в сутки · {favorites} избранных. {DETAILS[tier]}"])
+        lines.extend([f"<b>{tier}</b> · {cost}", f"{alerts} сигналов в сутки · {favorites} избранных. {DETAILS[tier]} Цель обновления: {MINUTES[tier]} мин, при наличии свежих данных."])
         buttons.append({"text": tier, "callback_data": "sub:" + tier})
     return "\n".join(lines), [buttons[:2], buttons[2:], [{"text": "Меню", "callback_data": "menu:main"}]]
 
@@ -110,9 +116,13 @@ def admin(cfg, store, tg, uid, action, now):
         return "Раздел доступен владельцу.", None
     keyboard = [[{"text": label, "callback_data": "admin:" + cmd}] for cmd,label in (
         ("users","Пользователи"), ("income","Доход NFT Tracker"), ("monitor","Мониторинг"), ("config","Настройки"), ("preview","Проверить тариф"))]
+    if cfg.stars_payments:
+        keyboard = [row for row in keyboard if row[0]["callback_data"] != "admin:preview"]
+        if action.split()[:1] == ["preview"]:
+            return "Проверка тестовых тарифов отключена при продаже подписок.", keyboard
     action = action.strip() or "menu"
     label = action.split()[0]
-    if label not in ("menu","users","income","monitor","config","limit","reports","threshold","preview"):
+    if label not in ("menu","users","income","monitor","config","limit","reports","threshold","preview","refund"):
         label = "unknown"
     with store.db:
         store.db.execute("INSERT INTO audit(at,action) VALUES (?,?)", (int(now.timestamp()), "admin:"+label))
@@ -126,6 +136,8 @@ def admin(cfg, store, tg, uid, action, now):
             trial = {} if name == "FREE" else {"plan": name, "end": int(now.timestamp()) + 86400}
             store.set("owner_plan_preview", json.dumps(trial))
             return menu(store, *effective_access(cfg, store, uid, int(now.timestamp())))
+    if action.startswith("refund "):
+        return owner_refund(cfg, store, tg, uid, action.split(maxsplit=1)[1], int(now.timestamp()))
     if action == "users":
         names = Counter(entitlement(store.db, u or uid, int(now.timestamp()))[0] for u, in store.db.execute("SELECT chat_id FROM users"))
         return f"Пользователей: {sum(names.values())} · с активным платным доступом: {sum(names.values())-names['FREE']}\n" + " · ".join(f"{n}: {names[n]}" for n in PLANS), keyboard
@@ -216,6 +228,16 @@ def view(cfg, store, tg, uid, key, command, args, now):
         return f"Эта функция доступна с {tier}. Ваш тариф — {name}.", SUB
     if command == "/admin":
         return admin(cfg, store, tg, uid, args or "menu", now)
+    if command == "/payments":
+        rows = store.db.execute("""SELECT t.rowid,o.plan,o.amount,t.starts,r.charge IS NOT NULL
+            FROM star_orders o JOIN star_terms t USING(payload) JOIN star_checkouts c USING(payload)
+            LEFT JOIN star_refunds r ON r.charge=t.charge WHERE o.uid=? AND c.completed_charge=t.charge
+            ORDER BY t.starts DESC,t.rowid DESC LIMIT 10""", (uid,)).fetchall()
+        lines = ["Ваши последние подтверждённые платежи:"]
+        for number, tier, amount, stamp, refunded in rows:
+            date = datetime.fromtimestamp(stamp, timezone.utc).strftime("%d.%m.%Y")
+            lines.append(f"№{number} · {date} · {tier} · {amount} ⭐ · " + ("возврат" if refunded else "оплачено"))
+        return ("\n".join(lines) if rows else "Подтверждённых платежей пока нет."), SUB
     if command == "/subscription":
         waiting = pending_plan(store.db, uid)
         if waiting:
@@ -244,14 +266,15 @@ def view(cfg, store, tg, uid, key, command, args, now):
     if command == "/report" and store.get("reports_enabled", "1") != "1":
         return "Владелец временно отключил экспериментальный отчёт.", SUB
     if command == "/gift":
-        snap = store.get_json("price_catalog")
-        rows = snap.get("rows", [])
-        visible = rows if plan.level else rows[:5]
-        row = next((r for r in visible if r["name"].casefold()==args.casefold()), None)
+        snap, fallback = visible_catalog(store, full=plan.level >= 1)
+        row = next((r for r in snap.get("rows", []) if r["name"].casefold()==args.casefold()), None)
         if not row:
+            if plan.level:
+                return ("Полный снимок временно недоступен. Доступные коллекции — /prices." if fallback or not snap
+                        else "Коллекция не найдена. Проверьте название в /prices."), SUB
             return "Укажите доступную коллекцию из /prices. Полный каталог доступен с PLUS.", SUB
         lines = [html.escape(row["name"]), "Снимок StarPrice: " + snap["at"][:10],
-                 "Ориентиры: " + ", ".join(f"{m} {p} {CURRENCIES[m]}" for m,p in row["prices"].items())]
+                 "Ориентиры: " + (", ".join(f"{m} {p} {CURRENCIES[m]}" for m,p in row["prices"].items()) or "нет данных")]
         if (now - datetime.fromisoformat(snap["at"])).days >= 5:
             lines.append("Снимок устарел.")
         sale = store.db.execute("SELECT model,backdrop,symbol,price,event_time FROM sales WHERE name=? ORDER BY event_time DESC LIMIT 1",

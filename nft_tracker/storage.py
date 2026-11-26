@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
+from .beta import SCHEMA as BETA_SCHEMA
 from .payments import SCHEMA as PAYMENTS_SCHEMA
 from .subscriptions import SCHEMA as SUBSCRIPTION_SCHEMA
 from .valuation import HISTORY_DAYS, MarketEvent
@@ -46,16 +47,23 @@ class User:
 
 
 class Storage:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, *, initialized=False):
         if str(path) != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(str(path))
+        if initialized:
+            # The webhook factory has already prepared this file. Mode rw fails
+            # closed if the database disappears between requests.
+            self.db = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=rw", uri=True)
+        else:
+            self.db = sqlite3.connect(str(path))
         # sqlite3 on Python 3.13 warns when a connection is garbage-collected
         # without close(). The main program closes explicitly; the finalizer
         # also releases test/exception-path connections safely.
         self._finalizer = weakref.finalize(self, self.db.close)
         self.db.execute("PRAGMA foreign_keys = ON")
-        self.db.executescript(SCHEMA + SUBSCRIPTION_SCHEMA + PAYMENTS_SCHEMA)
+        if initialized:
+            return
+        self.db.executescript(SCHEMA + SUBSCRIPTION_SCHEMA + PAYMENTS_SCHEMA + BETA_SCHEMA)
         # Backfill deduplication and day budgets for databases created by 0.5.x.
         if not self.get("subscription_migration_v1"):
             with self.db:

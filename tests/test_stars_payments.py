@@ -160,3 +160,70 @@ class StarsPayments(TestCase):
         self.assertIn("99", text)
         self.assertEqual(keyboard[1][0]["callback_data"], "buy:PLUS")
         self.telegram.call.assert_not_called()
+
+    def test_public_rate_limit_never_drops_paid_receipt(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        for _ in range(25):
+            self.update(message("/ping", chat=self.uid))
+        count = len(self.telegram.sent)
+        self.update(message("/ping", chat=self.uid))
+        self.assertEqual(len(self.telegram.sent), count)
+        self.receipt(event)
+        later = NOW + timedelta(minutes=1)
+        self.update(message("/payments", chat=self.uid), later)
+        self.assertIn("199 ⭐ · оплачено", self.telegram.sent[-1][1])
+        self.update(message("/payments", chat=self.uid+1), later)
+        self.assertIn("пока нет", self.telegram.sent[-1][1])
+        self.receipt(event, "refunded_payment")
+        self.update(message("/payments", chat=self.uid), later)
+        self.assertIn("199 ⭐ · возврат", self.telegram.sent[-1][1])
+
+    def test_paid_runtime_ignores_stored_owner_preview(self):
+        self.store.set("owner_plan_preview", '{"plan":"PRO","end":2147483647}')
+        self.update(message("/subscription", chat=self.cfg.owner_chat_id))
+        self.assertIn("Ваш тариф: <b>FREE</b>", self.telegram.sent[-1][1])
+        self.update(message("/admin preview ULTRA", chat=self.cfg.owner_chat_id))
+        self.assertIn("отключена", self.telegram.sent[-1][1])
+
+    def test_restore_paid_customer_from_private_backup(self):
+        from nft_tracker.backup import snapshot
+        self.update(message("/start", chat=self.uid))
+        self.assertIn("FREE", self.telegram.sent[-1][1] + str(entitlement(self.store.db,self.uid,self.stamp)))
+        event = self.invoice("PLUS")
+        self.assertTrue(self.check(event))
+        self.receipt(event)
+        path = Path(self.store.db.execute("PRAGMA database_list").fetchone()[2])
+        backup = path.with_name("backup.db")
+        restored = path.with_name("restored.db")
+        snapshot(path, backup)
+        snapshot(backup, restored)
+        with_store = Storage(restored)
+        self.addCleanup(with_store.close)
+        for command, expected in [("/subscription", "PLUS"), ("/payments","99 ⭐ · оплачено"), ("/summary","С начала суток")]:
+            handle_update(self.cfg, with_store, self.telegram, message(command,chat=self.uid), NOW)
+            self.assertIn(expected,self.telegram.sent[-1][1])
+        self.assertTrue(with_store.user(str(self.uid)).active)
+
+    def test_refund_requires_owner_action_and_replayed_click_cannot_spend_twice(self):
+        event = self.invoice()
+        self.assertTrue(self.check(event))
+        self.receipt(event)
+        self.telegram.call.reset_mock()
+        self.update(message("/admin refund 1",chat=self.cfg.owner_chat_id))
+        self.assertIn("Вернуть",self.telegram.sent[-1][1])
+        confirm = self.telegram.sent[-1][2][0][0]["callback_data"]
+        self.update(callback(confirm,chat=self.uid))
+        self.telegram.call.assert_not_called()
+        self.update(callback(confirm,chat=self.cfg.owner_chat_id))
+        self.update(callback(confirm,chat=self.cfg.owner_chat_id))
+        self.telegram.call.assert_called_once_with("refundStarPayment",
+            {"user_id":self.uid,"telegram_payment_charge_id":"fixture-charge"},timeout=5)
+        self.assertEqual(entitlement(self.store.db,self.uid,self.stamp),("FREE",None))
+
+    def test_sandbox_receipt_in_migrated_database_cannot_grant_commercial_access(self):
+        from tests.test_subscriptions import grant
+        grant(self.store,self.uid,"ULTRA")
+        self.update(message("/subscription",chat=self.uid))
+        self.assertIn("Ваш тариф: <b>FREE</b>", self.telegram.sent[-1][1])
+        self.assertTrue(self.check(self.invoice("PLUS")))

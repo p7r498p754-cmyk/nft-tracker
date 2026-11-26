@@ -23,7 +23,7 @@ class Parsing(unittest.TestCase):
 
     def test_template_link_only_when_configured(self):
         e = p.parse_event(RAW, LINK_TEMPLATE)
-        self.assertEqual(e.link, "https://t.me/test_bot/app?startapp=item_gift-1")
+        self.assertEqual(e.link, "https://t.me/portals/app?startapp=item_gift-1")
 
     def test_api_supplied_link_used_if_safe(self):
         raw = json.loads(json.dumps(RAW))

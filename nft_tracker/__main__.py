@@ -1,4 +1,4 @@
-"""CLI: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}"""
+"""CLI: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once|scan-once|scan-loop}"""
 from __future__ import annotations
 
 import logging
@@ -10,7 +10,7 @@ from threading import Event
 from . import __version__
 from .bot import process_updates, register_commands
 from .config import ConfigError, Settings
-from .catalog import fetch_catalog, refresh_catalog_if_due
+from .catalog import cache_preview, fetch_catalog, refresh_catalog_if_due
 from .floors import refresh
 from .monitor import run_cycle, utcnow
 from .portals import PortalsClient, PortalsError
@@ -114,6 +114,11 @@ def market_worker(cfg, portals, stop, once):
                     LOG.info("Свежих цен коллекций по площадкам: %s", count)
                 except (OSError, ValueError, TelegramError) as error:
                     LOG.warning("Обновление цен коллекций: %s", error)
+                    if not store.get("price_catalog"):
+                        try:
+                            cache_preview(store, utcnow())
+                        except (OSError, ValueError):
+                            LOG.warning("Резервный предпросмотр недоступен")
                     ok = False
                 next_floors = started + cfg.scan_seconds
             if once:
@@ -122,6 +127,15 @@ def market_worker(cfg, portals, stop, once):
         return True
     finally:
         store.close()
+
+
+def verify_polling_host(tg):
+    identity = tg.call("getMe", timeout=5)
+    if not isinstance(identity, dict) or identity.get("is_bot") is not True or str(identity.get("username")).lower() != "nfttrecker_bot":
+        raise TelegramError("Ожидался основной бот @nfttrecker_bot")
+    status = tg.call("getWebhookInfo", timeout=5)
+    if not isinstance(status, dict) or status.get("url") != "":
+        raise TelegramError("Перед запуском polling проверьте активный webhook")
 
 
 def run_loop(cfg, store, tg, portals, *, once=False):
@@ -154,16 +168,16 @@ def run_loop(cfg, store, tg, portals, *, once=False):
 
 def main(argv: list[str]) -> int:
     cmd = argv[1] if len(argv) > 1 else "run"
-    if cmd not in {"run", "loop", "diagnose", "commands", "register-commands", "serve-once"}:
-        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once}")
+    if cmd not in {"run", "loop", "diagnose", "commands", "register-commands", "serve-once", "scan-once", "scan-loop"}:
+        print("Использование: python -m nft_tracker {run|loop|diagnose|commands|register-commands|serve-once|scan-once|scan-loop}")
         return 2
     try:
         cfg = Settings.from_env(need_portals=cmd not in {"commands", "register-commands"})
     except ConfigError as e:
         print(f"Ошибка настройки: {e}")
         return 2
-    if cfg.stars_payments and cmd != "loop":
-        print("Режим оплаты Stars требует непрерывного запуска loop")
+    if cfg.stars_payments and cmd not in {"loop", "scan-loop", "scan-once", "register-commands"}:
+        print("Для приёма платежей запустите loop или отдельный webhook с scan-loop")
         return 2
     _setup_logging(cfg)
     LOG.info("NFT Tracker v%s, режим %s", __version__, cmd)
@@ -195,8 +209,21 @@ def main(argv: list[str]) -> int:
                 return 0 if ok else 1
         finally:
             store.close()
+    if cmd in {"scan-once", "scan-loop"}:
+        portals = None if cfg.setup_mode else PortalsClient(cfg.portals_key, link_template=cfg.listing_url_template,
+                                                            purchase_action=cfg.purchase_action)
+        try:
+            return 0 if market_worker(cfg, portals, Event(), once=cmd == "scan-once") else 1
+        except KeyboardInterrupt:
+            return 0
     store, tg, portals = _make(cfg)
     try:
+        if cmd == "loop" and cfg.stars_payments:
+            try:
+                verify_polling_host(tg)
+            except TelegramError as error:
+                LOG.error("Запуск приёма платежей остановлен: %s", error)
+                return 1
         if cmd == "run":
             ok = cycle_once(cfg, store, tg, portals)
             warm_catalog(cfg)

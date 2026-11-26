@@ -1,0 +1,20 @@
+name: beta-owner-card
+on:
+  push:
+    branches: [beta-0.7.0]
+    paths: [nft_tracker/card_check.py]
+permissions:
+  contents: read
+jobs:
+  card:
+    if: github.event.repository.private == false && contains(github.event.head_commit.message, '[owner-card]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          OWNER_CHAT_ID: ${{ secrets.OWNER_CHAT_ID }}
+          PORTALS_API_KEY: ${{ secrets.PORTALS_API_KEY }}
+          PRICE_UNIT: ${{ vars.PRICE_UNIT }}
+        run: python -m nft_tracker.card_check

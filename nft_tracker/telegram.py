@@ -31,12 +31,12 @@ class TelegramError(RuntimeError):
 
 
 class TelegramClient:
-    def __init__(self, token: str, opener: Callable[..., Any] | None = None):
-        self._token = token
+    def __init__(self, token: str, opener: Callable[..., Any] | None = None, *, test_server: bool = False):
+        self._base = API + urllib.parse.quote(token, safe=":") + ("/test/" if test_server else "/")
         self._open = opener or urllib.request.urlopen
 
     def call(self, method: str, payload: dict | None = None, timeout: int = TIMEOUT) -> Any:
-        url = API + urllib.parse.quote(self._token, safe=":") + "/" + method
+        url = self._base + method
         req = urllib.request.Request(url, data=json.dumps(payload or {}, ensure_ascii=False).encode(),
                                      headers={"Content-Type": "application/json"})
         try:
@@ -69,7 +69,7 @@ class TelegramClient:
         body = (f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
                 f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="prices.csv"\r\n'
                 f'Content-Type: text/csv; charset=utf-8\r\n\r\n{content}\r\n--{boundary}--\r\n').encode()
-        req = urllib.request.Request(API + urllib.parse.quote(self._token, safe=":") + "/sendDocument",
+        req = urllib.request.Request(self._base + "sendDocument",
                                      data=body, headers={"Content-Type": "multipart/form-data; boundary=" + boundary})
         try:
             with self._open(req, timeout=TIMEOUT) as response:

@@ -10,6 +10,7 @@ LOG = logging.getLogger(__name__)
 ORDER_LIFETIME = 1800
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS refund_requests(charge TEXT PRIMARY KEY, requested_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS star_checkouts (
     payload TEXT PRIMARY KEY REFERENCES star_orders(payload),
     expires INTEGER NOT NULL,
@@ -61,7 +62,7 @@ def reserve_checkout(db, uid, query, now):
         if order is None or not isinstance(query_id, str) or not query_id or order[3] is not None:
             return False
         _, expires, existing_query, _ = order
-        if expires <= now or entitlement(db, uid, now)[0] != "FREE":
+        if expires <= now or entitlement(db, uid, now, confirmed_only=True)[0] != "FREE":
             return False
         if existing_query is not None:
             return existing_query == query_id
@@ -117,3 +118,37 @@ def settle_receipt(db, uid, event, paid_at, *, refund=False):
         if db.execute("SELECT 1 FROM star_refunds WHERE charge=?", (charge,)).fetchone():
             return None
         return plan
+
+def owner_refund(cfg, store, tg, actor, receipt_id, now, *, confirm=False):
+    if actor != cfg.owner_chat_id or not cfg.stars_payments or cfg.on_actions:
+        return "Возврат недоступен.", None
+    if not receipt_id.isascii() or not receipt_id.isdigit() or len(receipt_id) > 16:
+        return "Укажите номер из /payments покупателя.", None
+    db = store.db
+    row = db.execute("""SELECT t.charge,o.uid,o.plan,o.amount,o.payload,r.charge
+        FROM star_terms t JOIN star_orders o USING(payload) JOIN star_checkouts c USING(payload)
+        LEFT JOIN star_refunds r ON r.charge=t.charge
+        WHERE t.rowid=? AND c.completed_charge=t.charge""", (int(receipt_id),)).fetchone()
+    if row is None:
+        return "Подтверждённая покупка не найдена.", None
+    charge, buyer, plan, amount, payload, refunded = row
+    if refunded:
+        return "Возврат уже подтверждён.", None
+    if not confirm:
+        return (f"Вернуть {amount} ⭐ за {plan}, квитанция №{receipt_id}? Доступ по покупке прекратится.",
+                [[{"text":"Подтвердить возврат", "callback_data":"refund:" + receipt_id}],
+                 [{"text":"Отмена", "callback_data":"menu:main"}]])
+    with db:
+        reserved = db.execute("INSERT OR IGNORE INTO refund_requests VALUES (?,?)", (charge,now)).rowcount
+    if not reserved:
+        return "Запрос уже зарегистрирован. Проверьте историю Stars перед дальнейшими действиями.", None
+    from .telegram import TelegramError
+    try:
+        ok = tg.call("refundStarPayment", {"user_id": buyer, "telegram_payment_charge_id": charge}, timeout=5)
+    except TelegramError:
+        ok = False
+    if ok is not True:
+        return "Подтверждения от Telegram нет. Требуется сверка истории Stars.", None
+    settle_receipt(db,buyer,{"telegram_payment_charge_id":charge, "invoice_payload":payload,
+                             "currency":"XTR","total_amount":amount},now,refund=True)
+    return "Telegram подтвердил возврат.", None

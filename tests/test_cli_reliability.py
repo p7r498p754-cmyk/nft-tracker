@@ -9,6 +9,31 @@ from tests.helpers import NOW, FakePortals, FakeTelegram, make_settings
 
 
 class ExitStatuses(unittest.TestCase):
+    def test_paid_polling_verifies_original_identity_and_delivery_mode(self):
+        from unittest.mock import Mock
+        from nft_tracker.__main__ import verify_polling_host
+
+        identity = {"is_bot": True, "username": "nfttrecker_bot"}
+        client = Mock()
+        for replies in [[{"is_bot": True, "username": "test_bot"}],
+                        [identity, {"url": "https://example.org/webhook"}], [identity, {}]]:
+            client.call.side_effect = replies
+            with self.assertRaises(TelegramError):
+                verify_polling_host(client)
+        client.call.side_effect = [identity, {"url": ""}]
+        verify_polling_host(client)
+
+    def test_payment_host_scans_without_polling_telegram(self):
+        cfg = make_settings(stars_payments=True, public_users=True)
+        with patch("nft_tracker.__main__.Settings.from_env", return_value=cfg), \
+             patch("nft_tracker.__main__._setup_logging"), \
+             patch("nft_tracker.__main__.market_worker", return_value=True) as scan, \
+             patch("nft_tracker.__main__.listen_for_commands") as poll:
+            self.assertEqual(main(["nft_tracker", "scan-loop"]), 0)
+            self.assertFalse(scan.call_args.kwargs["once"])
+            self.assertEqual(main(["nft_tracker", "commands"]), 2)
+            poll.assert_not_called()
+
     def test_portals_failure_reports_failed_cycle(self):
         cfg = make_settings()
         store = Storage(":memory:")

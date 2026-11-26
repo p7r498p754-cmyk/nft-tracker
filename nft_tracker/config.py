@@ -51,6 +51,7 @@ class Settings:
     listing_pages: int = 12   # 20 events/page; Portals allows offsets through 700
     on_actions: bool = False
     github_event: str = ""
+    closed_beta: bool = False
     public_users: bool = False
     owner_lifetime_ultra: bool = False
     stars_payments: bool = False
@@ -87,6 +88,9 @@ class Settings:
         stars_payments = _flag(env, "STARS_PAYMENTS")
         support = env.get("STARS_SUPPORT", "").strip().removeprefix("@")
         terms = env.get("STARS_TERMS_URL", "").strip()
+        beta = _flag(env, "CLOSED_BETA")
+        if beta and (stars_payments or _flag(env, "PUBLIC_USERS") or _flag(env, "GITHUB_ACTIONS") or int(owner) == 0 or str(db_path) == ":memory:"):
+            raise ConfigError("Закрытой бете нужны владелец, приватная постоянная база и выключенные платежи.")
         if env.get("GITHUB_REPOSITORY") == "p7r498p754-cmyk/nft-tracker":
             support = support or "nishjta"
             terms = terms or "https://github.com/p7r498p754-cmyk/nft-tracker/blob/main/docs/stars-purchase-terms.md"
@@ -116,6 +120,7 @@ class Settings:
             scan_seconds=_int(env, "SCAN_SECONDS", 600, 60, 86400),
             listing_pages=_int(env, "LISTING_PAGES", 12, 1, 36),
             owner_lifetime_ultra=_flag(env, "OWNER_LIFETIME_ULTRA"),
+            closed_beta=beta,
             public_users=_flag(env, "PUBLIC_USERS") and not _flag(env, "GITHUB_ACTIONS") and int(owner) > 0,
             github_event=env.get("GITHUB_EVENT_NAME", ""),
             on_actions=env.get("GITHUB_ACTIONS", "").lower() == "true",

@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   scan:
-    if: github.event.repository.private == false
+    if: github.event.repository.private == false && vars.PRIVATE_HOST_ACTIVE != '1'
     runs-on: ubuntu-latest
     timeout-minutes: 14
     env:
