@@ -209,6 +209,33 @@ class SetupAndConfig(unittest.TestCase):
         self.assertIn(str(PAID), tg.sent[-1][1])
 
 
+class ChatIdHelper(unittest.TestCase):
+    def run_update(self, upd):
+        from nft_tracker.bot import handle_update
+        tg = FakeTelegram()
+        handle_update(make_settings(), Storage(":memory:"), tg, upd, NOW)
+        return tg.sent
+
+    def test_bot_promoted_in_channel_reports_id(self):
+        sent = self.run_update({"update_id": 1, "my_chat_member": {
+            "chat": {"id": PAID, "type": "channel", "title": "PLUS"},
+            "new_chat_member": {"status": "administrator"}}})
+        self.assertEqual(sent[0][0], OWNER)
+        self.assertIn(str(PAID), sent[0][1])
+
+    def test_id_command_posted_in_channel(self):
+        sent = self.run_update({"update_id": 1, "channel_post": {
+            "chat": {"id": PAID, "type": "channel", "title": "PLUS"}, "text": "/id"}})
+        self.assertIn(f"<code>{PAID}</code>", sent[0][1])
+        self.assertEqual(self.run_update({"update_id": 2, "channel_post": {
+            "chat": {"id": PAID, "type": "channel"}, "text": "привет"}}), [])
+
+    def test_group_is_flagged(self):
+        sent = self.run_update({"update_id": 1, "message": {"from": {"id": OWNER}, "text": "/id",
+                                "chat": {"id": -100555, "type": "supergroup", "title": "PLUS"}}})
+        self.assertIn("это группа", sent[0][1])
+
+
 PLUS_ID, ULTRA_ID = -1003333333333, -1004444444444
 PLUS_INV, ULTRA_INV = "https://t.me/+PlusPlus1234", "https://t.me/+UltraUltra12"
 

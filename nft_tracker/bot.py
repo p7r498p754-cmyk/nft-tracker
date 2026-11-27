@@ -187,10 +187,54 @@ def _screen(cfg: Settings, store: Storage, action: str, now: datetime, key=OWNER
     return "Главное меню:", MENU
 
 
+def _chat_id_helper(cfg: Settings, tg: TelegramClient, update: dict) -> bool:
+    """Tell the owner a channel/group ID: when the bot is made admin there, or on /id posted inside it."""
+    if not cfg.owner_chat_id:
+        return False
+    member = update.get("my_chat_member")
+    post = update.get("channel_post")
+    msg = update.get("message") or {}
+    if isinstance(member, dict):
+        chat = member.get("chat") or {}
+        status = (member.get("new_chat_member") or {}).get("status")
+        if chat.get("type") == "private":
+            return False
+        if status == "administrator":
+            _send_chat_id(cfg, tg, chat)
+        return True
+    if isinstance(post, dict):
+        if str(post.get("text") or "").split("@")[0].strip().lower() == "/id":
+            _send_chat_id(cfg, tg, post.get("chat") or {})
+        return True
+    chat = msg.get("chat") or {}
+    if chat.get("type") in ("group", "supergroup"):
+        if (msg.get("from") or {}).get("id") == cfg.owner_chat_id and \
+                str(msg.get("text") or "").split("@")[0].strip().lower() == "/id":
+            _send_chat_id(cfg, tg, chat)
+        return True
+    return False
+
+
+def _send_chat_id(cfg: Settings, tg: TelegramClient, chat: dict) -> None:
+    title = html.escape(str(chat.get("title", "")))
+    if chat.get("type") == "channel":
+        text = (f"ID канала «{title}»: <code>{chat.get('id')}</code>\n"
+                "Укажите его в GitHub Variables (PAID_CHANNEL_ID, PLUS_CHANNEL_ID, ULTRA_CHANNEL_ID или FREE_CHANNEL_ID).")
+    else:
+        text = (f"«{title}» — это группа, а не канал (ID <code>{chat.get('id')}</code>). Для тарифов нужен канал: "
+                "создайте частный канал и добавьте бота администратором.")
+    try:
+        tg.send(cfg.owner_chat_id, text)
+    except TelegramError:
+        pass
+
+
 def handle_update(cfg: Settings, store: Storage, tg: TelegramClient, update: dict, now: datetime) -> None:
     query = update.get("pre_checkout_query")
     if isinstance(query, dict):
         answer_checkout(cfg, store, tg, query, int(now.timestamp()))
+        return
+    if _chat_id_helper(cfg, tg, update):
         return
     msg: dict[str, Any] | None = update.get("message")
     cb: dict[str, Any] | None = update.get("callback_query")
