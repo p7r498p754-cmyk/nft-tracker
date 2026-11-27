@@ -256,11 +256,16 @@ def run_cycle(cfg: Settings, store: Storage, tg: TelegramClient, portals: Portal
         except TelegramError as e:
             rep.error = str(e)
             retry_needed = True
+        copies, copy_error = channels.publish_tier_copies(cfg, store, tg, sig, sid, link, now)
+        rep.channel_posts += copies
+        if copy_error:
+            rep.warning = (rep.warning + " | " if rep.warning else "") + copy_error
 
     if channel_on:
         try:
             rep.teasers = channels.publish_teasers(cfg, store, tg, portals, now)
             channels.daily_stats(cfg, store, tg, now)
+            channels.ultra_report(cfg, store, tg, now)
         except Exception as e:  # noqa: BLE001 - marketing posts must never break monitoring
             rep.warning = (rep.warning + " | " if rep.warning else "") + f"Бесплатный канал: {e}"
         channels.prune(store, now)

@@ -24,5 +24,15 @@ jobs:
           PAID_CHANNEL_ID: ${{ vars.PAID_CHANNEL_ID }}
           FREE_CHANNEL_ID: ${{ vars.FREE_CHANNEL_ID }}
           PAID_CHANNEL_INVITE: ${{ vars.PAID_CHANNEL_INVITE }}
+          PLUS_CHANNEL_ID: ${{ vars.PLUS_CHANNEL_ID }}
+          PLUS_CHANNEL_INVITE: ${{ vars.PLUS_CHANNEL_INVITE }}
+          ULTRA_CHANNEL_ID: ${{ vars.ULTRA_CHANNEL_ID }}
+          ULTRA_CHANNEL_INVITE: ${{ vars.ULTRA_CHANNEL_INVITE }}
           CHANNEL_PRICE: ${{ vars.CHANNEL_PRICE }}
+          PLUS_PRICE: ${{ vars.PLUS_PRICE }}
+          ULTRA_PRICE: ${{ vars.ULTRA_PRICE }}
+          PLUS_DAILY: ${{ vars.PLUS_DAILY }}
+          CHANNEL_DISCOUNT: ${{ vars.CHANNEL_DISCOUNT }}
+          FREE_DELAY_MIN: ${{ vars.FREE_DELAY_MIN }}
+          FREE_MAX_PER_DAY: ${{ vars.FREE_MAX_PER_DAY }}
         run: python -m nft_tracker channel-setup

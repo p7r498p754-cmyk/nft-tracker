@@ -15,8 +15,10 @@ Flow per cycle:
 """
 from __future__ import annotations
 
+import html
 import json
 import logging
+import statistics
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -34,6 +36,8 @@ CREATE TABLE IF NOT EXISTS channel_posts (
   signal_id TEXT PRIMARY KEY, posted_at TEXT NOT NULL, discount TEXT NOT NULL,
   data TEXT NOT NULL, teaser INTEGER NOT NULL DEFAULT 0, teaser_at TEXT);
 CREATE INDEX IF NOT EXISTS channel_posts_time ON channel_posts(posted_at);
+CREATE TABLE IF NOT EXISTS channel_copies (
+  tier TEXT NOT NULL, signal_id TEXT NOT NULL, day TEXT NOT NULL, PRIMARY KEY (tier, signal_id));
 """
 
 
@@ -235,6 +239,7 @@ def prune(store: Storage, now: datetime, days: int = 14) -> None:
     ensure_schema(store)
     with store.db:
         store.db.execute("DELETE FROM channel_posts WHERE posted_at < ?", (iso(now - timedelta(days=days)),))
+        store.db.execute("DELETE FROM channel_copies WHERE day < ?", ((now - timedelta(days=days)).date().isoformat(),))
 
 
 # --- one-off setup (manual workflow) ------------------------------------------
@@ -249,10 +254,12 @@ def setup_report(cfg, tg: TelegramClient) -> tuple[bool, list[str]]:
         return False, ["PAID_CHANNEL_ID не задан — режим каналов выключен."]
     me = tg.call("getMe")
     ok = True
-    for label, chat, need_invite in (("Платный канал", cfg.paid_channel, True),
+    for label, chat, need_invite in (("Канал PRO", cfg.paid_channel, True),
+                                     ("Канал PLUS", cfg.plus_channel, True),
+                                     ("Канал ULTRA", cfg.ultra_channel, True),
                                      ("Бесплатный канал", cfg.free_channel, False)):
         if not chat:
-            lines.append(f"{label}: не задан (необязательно)" if not need_invite else f"{label}: не задан")
+            lines.append(f"{label}: не задан")
             continue
         try:
             info = tg.call("getChat", {"chat_id": chat})
@@ -279,11 +286,147 @@ def setup_report(cfg, tg: TelegramClient) -> tuple[bool, list[str]]:
     return ok, lines
 
 
-def create_paid_invite(cfg, tg: TelegramClient) -> str:
+def create_paid_invite(cfg, tg: TelegramClient, chat=None, price=None, name="NFT Tracker") -> str:
     result = tg.call("createChatSubscriptionInviteLink", {
-        "chat_id": cfg.paid_channel, "name": "NFT Tracker", "subscription_period": 2592000,
-        "subscription_price": cfg.channel_price})
+        "chat_id": chat or cfg.paid_channel, "name": name, "subscription_period": 2592000,
+        "subscription_price": price or cfg.channel_price})
     link = result.get("invite_link") if isinstance(result, dict) else None
     if not isinstance(link, str) or not link.startswith("https://t.me/"):
         raise TelegramError("Telegram не вернул ссылку-подписку")
     return link
+
+
+# --- paid tiers ---------------------------------------------------------------
+def tiers(cfg) -> list[tuple[str, object, str, int]]:
+    """(name, chat, invite, price) of configured paid tiers, cheapest first."""
+    out = [("PLUS", cfg.plus_channel, cfg.plus_channel_invite, cfg.plus_price),
+           ("PRO", cfg.paid_channel, cfg.paid_channel_invite, cfg.channel_price),
+           ("ULTRA", cfg.ultra_channel, cfg.ultra_channel_invite, cfg.ultra_price)]
+    return [t for t in out if t[1]]
+
+
+def _detailed(cfg, sig: Signal, now: datetime, link) -> str:
+    est = sig.estimate
+    return (format_alert(sig, cfg.price_unit, now, cfg.timezone, bool(link)) +
+            f"\n\n🔬 Уровень сравнения: {'точное совпадение атрибутов' if est.tier == 'exact' else 'та же модель'}"
+            f"\nСопоставимых продаж: {est.sales}. Последняя: {est.newest:%d.%m.%Y %H:%M} UTC."
+            "\nВыбросы отсечены по медианному отклонению; при большом разбросе сигнал не публикуется.")
+
+
+def publish_tier_copies(cfg, store: Storage, tg: TelegramClient, sig: Signal, signal_id: str,
+                        link: str | None, now: datetime) -> tuple[int, str | None]:
+    """Copy a verified signal to PLUS (daily cap) and ULTRA (detailed). Never raises."""
+    ensure_schema(store)
+    sent, error = 0, None
+    day = now.date().isoformat()
+    kb = [[{"text": "🔗 Открыть объявление", "url": link}]] if link else None
+    for name, chat, cap, detailed in (("PLUS", cfg.plus_channel, cfg.plus_daily, False),
+                                      ("ULTRA", cfg.ultra_channel, None, True)):
+        if not chat:
+            continue
+        with store.db:
+            used = store.db.execute("SELECT count(*) FROM channel_copies WHERE tier=? AND day=?", (name, day)).fetchone()[0]
+            if cap is not None and used >= cap:
+                continue
+            cur = store.db.execute("INSERT OR IGNORE INTO channel_copies VALUES (?,?,?)", (name, signal_id, day))
+        if cur.rowcount == 0:
+            continue
+        text = _detailed(cfg, sig, now, link) if detailed else format_alert(sig, cfg.price_unit, now, cfg.timezone, bool(link))
+        try:
+            _post(tg, chat, text, kb, sig.event.photo_url)
+            sent += 1
+        except TelegramError as e:
+            error = str(e)
+            if e.code is not None:
+                with store.db:
+                    store.db.execute("DELETE FROM channel_copies WHERE tier=? AND signal_id=?", (name, signal_id))
+                if e.code in (400, 403):
+                    _notice(store, tg, cfg, name.lower() + "_channel",
+                            f"⚠️ Бот не может публиковать в канале {name}. Проверьте {name}_CHANNEL_ID и права "
+                            f"администратора. Ответ Telegram: {e}", now)
+    return sent, error
+
+
+def ultra_report(cfg, store: Storage, tg: TelegramClient, now: datetime) -> bool:
+    """Once per UTC day: market analytics for yesterday in the ULTRA channel."""
+    if not cfg.ultra_channel:
+        return False
+    ensure_schema(store)
+    yesterday = (now - timedelta(days=1)).date().isoformat()
+    if store.get("ultra_report_day") == yesterday:
+        return False
+    rows = store.db.execute("SELECT name, price FROM sales WHERE substr(event_time,1,10)=?", (yesterday,)).fetchall()
+    signals = store.db.execute("SELECT discount FROM channel_posts WHERE substr(posted_at,1,10)=?", (yesterday,)).fetchall()
+    if not rows and not signals:
+        store.set("ultra_report_day", yesterday)
+        return False
+    by_name: dict[str, list[Decimal]] = {}
+    for name, price in rows:
+        by_name.setdefault(name, []).append(Decimal(price))
+    top = sorted(by_name.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:7]
+    unit = html.escape(cfg.price_unit)
+    lines = [f"📈 <b>Рынок Portals за {datetime.fromisoformat(yesterday):%d.%m.%Y}</b>", "",
+             f"Продаж в выборке бота: <b>{len(rows)}</b>"]
+    if top:
+        lines.append("\n<b>Самые продаваемые коллекции</b> (продаж · медиана цены):")
+        for name, prices in top:
+            lines.append(f"• {html.escape(name)} — {len(prices)} · {statistics.median(prices).normalize():f} {unit}")
+    if signals:
+        ds = [Decimal(r[0]) for r in signals]
+        lines.append(f"\nСигналов за день: <b>{len(ds)}</b>, средняя скидка {(sum(ds) / len(ds)).quantize(Decimal('1'))}%, "
+                     f"лучшая {max(ds).quantize(Decimal('1'))}%.")
+    lines.append("\nВыборка — последние продажи, которые видит бот, а не весь рынок.")
+    try:
+        tg.send(cfg.ultra_channel, "\n".join(lines))
+    except TelegramError as e:
+        LOG.warning("Аналитика ULTRA: %s", e)
+        if e.code is not None:
+            return False
+    store.set("ultra_report_day", yesterday)
+    return True
+
+
+def free_link(cfg) -> str:
+    chat = cfg.free_channel
+    return f"https://t.me/{chat[1:]}" if isinstance(chat, str) and chat.startswith("@") else ""
+
+
+TIER_TEXT = {
+    "PLUS": "до {daily} сигналов в сутки сразу после проверки лота",
+    "PRO": "все сигналы сразу, без лимита",
+    "ULTRA": "все сигналы с подробным разбором оценки и ежедневная аналитика рынка",
+}
+
+
+def shop(cfg) -> tuple[str, list] | None:
+    """Storefront: tiers sold as Telegram Stars channel subscriptions."""
+    offers = [t for t in tiers(cfg) if t[2]]
+    if not offers:
+        return None
+    lines = ["⭐ <b>Подписки NFT Tracker</b>", ""]
+    buttons = []
+    free = free_link(cfg)
+    lines.append("<b>FREE</b> · бесплатно — до 3 лучших сигналов в сутки с задержкой 1 час и итоги дня" +
+                 (" в открытом канале." if free else "."))
+    if free:
+        buttons.append([{"text": "FREE · открыть канал", "url": free}])
+    for name, _, invite, price in offers:
+        lines.append(f"<b>{name}</b> · {price} ⭐ / 30 дней — " + TIER_TEXT[name].format(daily=cfg.plus_daily) + ".")
+        buttons.append([{"text": f"{name} · {price} ⭐", "url": invite}])
+    lines += ["", "Оплата Stars проходит в Telegram при вступлении в канал. Подписка продлевается автоматически, "
+              "отменить можно в любой момент в настройках канала.",
+              "Рынок проверяется примерно раз в час. Сигнал — оценка по медиане недавних продаж Portals, а не гарантия прибыли."]
+    return "\n".join(lines), buttons
+
+
+def bot_description(cfg) -> str:
+    """Plain text shown before /start (max 512 chars), so the shop works even while the bot is offline."""
+    parts = ["Сигналы о подарках Telegram на Portals со скидкой от 30% к медиане недавних продаж."]
+    free = free_link(cfg)
+    if free:
+        parts.append(f"FREE: {free}")
+    for name, _, invite, price in tiers(cfg):
+        if invite:
+            parts.append(f"{name} {price}⭐/мес: {invite}")
+    parts.append("Оценка, не гарантия прибыли.")
+    return "\n".join(parts)[:512]

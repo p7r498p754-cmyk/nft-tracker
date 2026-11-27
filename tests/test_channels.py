@@ -160,6 +160,10 @@ class SetupAndConfig(unittest.TestCase):
                                  "PAID_CHANNEL_INVITE": INVITE, "CHANNEL_PRICE": "300"})
         self.assertEqual((cfg.paid_channel, cfg.free_channel, cfg.channel_price), (PAID, "@nft_free_test", 300))
 
+    def test_config_accepts_public_links_and_bare_names(self):
+        for raw in ("https://t.me/nftt_traker", "t.me/nftt_traker/", "nftt_traker", "@nftt_traker"):
+            self.assertEqual(Settings.from_env({**self.ENV, "FREE_CHANNEL_ID": raw}).free_channel, "@nftt_traker")
+
     def test_config_rejects_bad_values(self):
         for k, v in (("PAID_CHANNEL_ID", "abc"), ("PAID_CHANNEL_INVITE", "http://evil"), ("CHANNEL_PRICE", "0")):
             with self.assertRaises(ConfigError):
@@ -175,7 +179,8 @@ class SetupAndConfig(unittest.TestCase):
                         "getChat": {"type": "channel"},
                         "getChatMember": {"status": "administrator", "can_post_messages": True,
                                           "can_invite_users": True},
-                        "createChatSubscriptionInviteLink": {"invite_link": INVITE}}[method]
+                        "createChatSubscriptionInviteLink": {"invite_link": INVITE},
+                        "setMyDescription": True, "setMyShortDescription": True}[method]
         tg = Tg()
         cfg = make_settings(paid_channel=PAID, free_channel=FREE)
         self.assertEqual(channel_setup(cfg, tg), 0)
@@ -202,6 +207,119 @@ class SetupAndConfig(unittest.TestCase):
                "forward_origin": {"type": "channel", "chat": {"id": PAID, "title": "Сигналы"}}}}
         handle_update(cfg, store, tg, upd, NOW)
         self.assertIn(str(PAID), tg.sent[-1][1])
+
+
+class ChatIdHelper(unittest.TestCase):
+    def run_update(self, upd):
+        from nft_tracker.bot import handle_update
+        tg = FakeTelegram()
+        handle_update(make_settings(), Storage(":memory:"), tg, upd, NOW)
+        return tg.sent
+
+    def test_bot_promoted_in_channel_reports_id(self):
+        sent = self.run_update({"update_id": 1, "my_chat_member": {
+            "chat": {"id": PAID, "type": "channel", "title": "PLUS"},
+            "new_chat_member": {"status": "administrator"}}})
+        self.assertEqual(sent[0][0], OWNER)
+        self.assertIn(str(PAID), sent[0][1])
+
+    def test_id_command_posted_in_channel(self):
+        sent = self.run_update({"update_id": 1, "channel_post": {
+            "chat": {"id": PAID, "type": "channel", "title": "PLUS"}, "text": "/id"}})
+        self.assertIn(f"<code>{PAID}</code>", sent[0][1])
+        self.assertEqual(self.run_update({"update_id": 2, "channel_post": {
+            "chat": {"id": PAID, "type": "channel"}, "text": "привет"}}), [])
+
+    def test_group_is_flagged(self):
+        sent = self.run_update({"update_id": 1, "message": {"from": {"id": OWNER}, "text": "/id",
+                                "chat": {"id": -100555, "type": "supergroup", "title": "PLUS"}}})
+        self.assertIn("это группа", sent[0][1])
+
+
+PLUS_ID, ULTRA_ID = -1003333333333, -1004444444444
+PLUS_INV, ULTRA_INV = "https://t.me/+PlusPlus1234", "https://t.me/+UltraUltra12"
+
+
+def tiered(listings, **kw):
+    return setup(listings, plus_channel=PLUS_ID, ultra_channel=ULTRA_ID, plus_channel_invite=PLUS_INV,
+                 ultra_channel_invite=ULTRA_INV, free_channel="@nftt_traker", **kw)
+
+
+class Tiers(unittest.TestCase):
+    def test_signal_reaches_all_paid_tiers_once(self):
+        cfg, store, tg, pt = tiered([cheap()])
+        rep = monitor.run_cycle(cfg, store, tg, pt, NOW)
+        self.assertEqual(rep.channel_posts, 3)
+        self.assertCountEqual(chats(tg), [PAID, PLUS_ID, ULTRA_ID])
+        ultra = [t for c, t, _ in tg.sent if c == ULTRA_ID][0]
+        self.assertIn("Сопоставимых продаж: 3", ultra)
+        monitor.run_cycle(cfg, store, tg, pt, NOW + timedelta(minutes=10))
+        self.assertEqual(len(chats(tg)), 3)
+
+    def test_plus_daily_cap(self):
+        cfg, store, tg, pt = tiered([cheap("60", "a"), cheap("55", "b"), cheap("50", "c")], plus_daily=2)
+        monitor.run_cycle(cfg, store, tg, pt, NOW)
+        self.assertEqual(chats(tg).count(PLUS_ID), 2)
+        self.assertEqual(chats(tg).count(PAID), 3)
+        self.assertEqual(chats(tg).count(ULTRA_ID), 3)
+
+    def test_plus_failure_does_not_block_pro(self):
+        cfg, store, tg, pt = tiered([cheap()])
+        real = tg.send
+        def send(chat, text, kb=None):
+            if chat == PLUS_ID:
+                raise TelegramError("Forbidden", 403)
+            real(chat, text, kb)
+        tg.send = send
+        rep = monitor.run_cycle(cfg, store, tg, pt, NOW)
+        self.assertIn(PAID, chats(tg))
+        self.assertIn("Forbidden", rep.warning)
+
+    def test_ultra_daily_report(self):
+        cfg, store, tg, pt = tiered([cheap()])
+        monitor.run_cycle(cfg, store, tg, pt, NOW)
+        pt._l, pt._p = [], []
+        monitor.run_cycle(cfg, store, tg, pt, NOW + timedelta(days=1))
+        reports = [t for c, t, _ in tg.sent if c == ULTRA_ID and "Рынок Portals" in t]
+        self.assertEqual(len(reports), 1)
+        self.assertIn("Сигналов за день: <b>1</b>", reports[0])
+
+    def test_shop_lists_tiers_for_any_user(self):
+        from nft_tracker.bot import handle_update
+        from tests.helpers import message
+        cfg, store, tg, _ = tiered([])
+        handle_update(cfg, store, tg, message("/start", chat=12345), NOW)
+        text, kb = tg.sent[-1][1], tg.sent[-1][2]
+        for part in ("FREE", "PLUS</b> · 99 ⭐", "PRO</b> · 199 ⭐", "ULTRA</b> · 399 ⭐", "продлевается автоматически"):
+            self.assertIn(part, text)
+        urls = [row[0]["url"] for row in kb]
+        self.assertEqual(urls, ["https://t.me/nftt_traker", PLUS_INV, INVITE, ULTRA_INV])
+        handle_update(cfg, store, tg, message("/status", chat=12345, update_id=2), NOW)
+        self.assertIn("закрытом режиме", tg.sent[-1][1])
+
+    def test_setup_creates_missing_links_and_description(self):
+        from nft_tracker.__main__ import channel_setup
+        made = []
+
+        class Tg(FakeTelegram):
+            def call(self, method, payload=None, timeout=0):
+                if method == "createChatSubscriptionInviteLink":
+                    made.append((payload["chat_id"], payload["subscription_price"]))
+                    return {"invite_link": f"https://t.me/+Link{len(made)}abcdefg"}
+                if method == "setMyDescription":
+                    self.description = payload["description"]
+                    return True
+                return {"getMe": {"id": 9}, "getChat": {"type": "channel"}, "setMyShortDescription": True,
+                        "getChatMember": {"status": "administrator", "can_post_messages": True,
+                                          "can_invite_users": True}}[method]
+        tg = Tg()
+        cfg = make_settings(paid_channel=PAID, paid_channel_invite=INVITE, plus_channel=PLUS_ID,
+                            ultra_channel=ULTRA_ID, free_channel="@nftt_traker")
+        self.assertEqual(channel_setup(cfg, tg), 0)
+        self.assertEqual(made, [(PLUS_ID, 99), (ULTRA_ID, 399)])
+        self.assertIn("PLUS_CHANNEL_INVITE = https://t.me/+Link1abcdefg", tg.sent[-1][1])
+        self.assertIn("ULTRA 399⭐/мес: https://t.me/+Link2abcdefg", tg.description)
+        self.assertIn(INVITE, tg.description)
 
 
 if __name__ == "__main__":

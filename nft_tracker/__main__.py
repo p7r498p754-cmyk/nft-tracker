@@ -154,7 +154,9 @@ def run_loop(cfg, store, tg, portals, *, once=False):
 
 
 def channel_setup(cfg, tg) -> int:
-    """Manual one-off: check channel rights, create the Stars subscription link."""
+    """Manual one-off: check channel rights, create missing Stars subscription
+    links for PLUS/PRO/ULTRA and put the storefront into the bot description."""
+    from dataclasses import replace
     from . import channels
     if cfg.setup_mode:
         LOG.error("Сначала задайте OWNER_CHAT_ID")
@@ -164,14 +166,26 @@ def channel_setup(cfg, tg) -> int:
         for line in lines:
             LOG.info(line)
         report = "🛠 <b>Настройка каналов</b>\n" + "\n".join(lines)
-        if ok and not cfg.paid_channel_invite:
-            link = channels.create_paid_invite(cfg, tg)
-            report += (f"\n\n⭐ Ссылка-подписка ({cfg.channel_price} Stars / 30 дней):\n{link}\n\n"
-                       "Сохраните её в GitHub → Settings → Secrets and variables → Actions → Variables "
-                       "как PAID_CHANNEL_INVITE. Повторный запуск без этой переменной создаст ещё одну ссылку.")
-            LOG.info("Ссылка-подписка создана и отправлена владельцу в Telegram")
-        elif ok:
-            report += "\n\nСсылка-подписка уже задана в PAID_CHANNEL_INVITE."
+        if ok:
+            created = []
+            fields = {"PLUS": "plus_channel_invite", "PRO": "paid_channel_invite", "ULTRA": "ultra_channel_invite"}
+            names = {"PLUS": "PLUS_CHANNEL_INVITE", "PRO": "PAID_CHANNEL_INVITE", "ULTRA": "ULTRA_CHANNEL_INVITE"}
+            for name, chat, invite, price in channels.tiers(cfg):
+                if invite:
+                    continue
+                link = channels.create_paid_invite(cfg, tg, chat, price, f"NFT Tracker {name}")
+                cfg = replace(cfg, **{fields[name]: link})
+                created.append(f"{names[name]} = {link}  ({price} ⭐ / 30 дней)")
+            if created:
+                report += ("\n\n⭐ Новые ссылки-подписки. Сохраните каждую в GitHub → Settings → Secrets and variables → "
+                           "Actions → Variables под указанным именем:\n" + "\n".join(created) +
+                           "\n\nПовторный запуск без этих переменных создаст новые ссылки.")
+                LOG.info("Создано ссылок-подписок: %s (отправлены владельцу в Telegram)", len(created))
+            else:
+                report += "\n\nВсе ссылки-подписки уже заданы."
+            tg.call("setMyDescription", {"description": channels.bot_description(cfg)})
+            tg.call("setMyShortDescription", {"short_description": "Сигналы о дешёвых подарках Telegram на Portals. Тарифы: /buy"})
+            report += "\nОписание бота с тарифами обновлено."
         tg.send(cfg.owner_chat_id, report)
     except TelegramError as error:
         LOG.error("Настройка каналов: %s", error)
